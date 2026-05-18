@@ -87,6 +87,17 @@ p {
   gap: 12px;
 }
 
+.auth-chip {
+  align-items: center;
+  border: 1px solid #d8e0e4;
+  border-radius: 6px;
+  color: #384852;
+  display: inline-flex;
+  font-size: 0.9rem;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
 .tabs {
   border-bottom: 1px solid #d8e0e4;
   margin-bottom: 24px;
@@ -115,6 +126,36 @@ p {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.compact-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.span-all,
+.form-actions {
+  grid-column: 1 / -1;
+}
+
+.form-actions {
+  justify-content: flex-start;
+}
+
+.field-group {
+  border: 1px solid #dfe5e8;
+  border-radius: 8px;
+  margin: 0;
+  padding: 14px;
+  min-width: 0;
+}
+
+.field-group legend {
+  color: #384852;
+  font-size: 0.78rem;
+  font-weight: 750;
+  margin-left: 6px;
+  padding: 0 6px;
+  text-transform: uppercase;
+}
+
 label {
   color: #384852;
   display: grid;
@@ -131,7 +172,9 @@ select {
   color: #172026;
   font: inherit;
   min-height: 42px;
+  min-width: 0;
   padding: 0 12px;
+  width: 100%;
 }
 
 input[type="checkbox"] {
@@ -192,6 +235,32 @@ pre {
   border-radius: 8px;
   color: #e6edf0;
   padding: 16px;
+}
+
+.detail-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.detail-grid span {
+  color: #677782;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.detail-grid strong {
+  color: #172026;
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin-top: 3px;
 }
 
 .request-status {

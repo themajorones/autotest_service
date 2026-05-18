@@ -25,10 +25,12 @@ import dev.themajorones.models.dto.CreateAndroidVMRequest;
 import dev.themajorones.models.dto.DockerCapability;
 import dev.themajorones.models.dto.OllamaModelSummary;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
-import dev.themajorones.models.entity.AndroidVM;
 import dev.themajorones.models.entity.Docker;
 import dev.themajorones.models.entity.Ollama;
+import dev.themajorones.models.entity.AndroidVMRecord;
+import dev.themajorones.models.entity.RetroidAndroidVM;
 import dev.themajorones.models.entity.TaskLog;
+import dev.themajorones.models.mapper.AndroidVmMapper;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -117,46 +119,60 @@ public class ConnectionManagerService {
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> listAndroidVMs() {
-        return androidVMRepository.findAllByOrderByIdDesc().stream().map(this::androidVmMap).toList();
+        return androidVMRepository.findAllByOrderByIdDesc().stream()
+            .map(AndroidVmMapper::toFlatMap)
+            .toList();
     }
 
     @Transactional
     public Map<String, Object> updateAndroidVM(Integer id, CreateAndroidVMRequest request) {
-        AndroidVM vm = getAndroidVmEntity(id);
+        AndroidVMRecord record = getAndroidVmRecord(id);
+        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(record));
         CreateAndroidVMRequest normalized = normalizeAndroidRequest(request);
         vm
             .setDocker(getDocker(requireId(normalized.getDockerId(), "Docker connection id")))
             .setName(requireText(normalized.getName(), "Android VM name"))
             .setImage(normalized.getImage())
             .setAccelerationMode(normalized.getAccelerationMode());
-        return androidVmMap(androidVMRepository.save(vm));
+        if (normalized.getWidth() != null) {
+            vm.setWidth(normalized.getWidth());
+        }
+        if (normalized.getHeight() != null) {
+            vm.setHeight(normalized.getHeight());
+        }
+        if (normalized.getDpi() != null) {
+            vm.setDpi(normalized.getDpi());
+        }
+        return AndroidVmMapper.toFlatMap(androidVMRepository.save(AndroidVmMapper.toRecord(vm)));
     }
 
     @Transactional(readOnly = true)
     public AndroidVMDetail getAndroidVM(Integer id) {
-        AndroidVM vm = getAndroidVmEntity(id);
+        AndroidVMRecord record = getAndroidVmRecord(id);
+        var vm = AndroidVmMapper.fromRecord(record);
         String inspectJson = null;
         if (hasText(vm.getContainerId())) {
             inspectJson = dockerClient.inspectContainerJson(vm.getDocker().getBaseUrl(), vm.getContainerId());
         }
-        return new AndroidVMDetail().setAndroidVM(vm).setDockerInspectJson(inspectJson);
+        return new AndroidVMDetail().setAndroidVM(AndroidVmMapper.toFlatMap(vm)).setDockerInspectJson(inspectJson);
     }
 
     @Transactional
     public Map<String, Object> createAndroidVM(CreateAndroidVMRequest request) {
         Docker docker = getDocker(requireId(request.getDockerId(), "Docker connection id"));
         CreateAndroidVMRequest normalized = normalizeAndroidRequest(request);
-        AndroidVM vm = androidVMRepository.save(new AndroidVM()
-            .setDocker(docker)
-            .setName(requireText(normalized.getName(), "Android VM name"))
-            .setImage(normalized.getImage())
-            .setAccelerationMode(normalized.getAccelerationMode())
-            .setStatus(ConnectionStatusConstant.QUEUED));
+        normalized.setName(requireText(normalized.getName(), "Android VM name"));
+        RetroidAndroidVM vm = AndroidVmMapper.fromRequest(
+            normalized,
+            docker,
+            ConnectionStatusConstant.QUEUED
+        );
+        AndroidVMRecord saved = androidVMRepository.save(AndroidVmMapper.toRecord(vm));
 
         TaskLog taskLog = taskLogRepository.save(new TaskLog()
             .setType(TaskLogConstant.Type.CREATE_ANDROID_VM)
             .setStatus(TaskLogConstant.Status.PENDING)
-            .setContent(androidVmTaskContent(vm, normalized)));
+            .setContent(androidVmTaskContent(saved.getId(), docker.getId(), normalized)));
 
         TaskCommandEnvelope envelope = new TaskCommandEnvelope()
             .setTaskLogId(taskLog.getId())
@@ -171,26 +187,27 @@ public class ConnectionManagerService {
         taskLog.setStatus(TaskLogConstant.Status.QUEUED);
         taskLogRepository.save(taskLog);
 
-        return Map.of("androidVMId", vm.getId(), "taskLogId", taskLog.getId());
+        return Map.of("androidVMId", saved.getId(), "taskLogId", taskLog.getId());
     }
 
     @Transactional
     public Map<String, Object> stopAndroidVM(Integer id) {
-        AndroidVM vm = getAndroidVmEntity(id);
+        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(getAndroidVmRecord(id)));
         if (hasText(vm.getContainerId())) {
             dockerClient.stopContainer(vm.getDocker().getBaseUrl(), vm.getContainerId());
         }
         vm.setStatus(ConnectionStatusConstant.STOPPED);
-        return androidVmMap(androidVMRepository.save(vm));
+        return AndroidVmMapper.toFlatMap(androidVMRepository.save(AndroidVmMapper.toRecord(vm)));
     }
 
     @Transactional
     public void deleteAndroidVM(Integer id) {
-        AndroidVM vm = getAndroidVmEntity(id);
+        AndroidVMRecord record = getAndroidVmRecord(id);
+        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(record));
         if (hasText(vm.getContainerId())) {
             dockerClient.removeContainer(vm.getDocker().getBaseUrl(), vm.getContainerId());
         }
-        androidVMRepository.delete(vm);
+        androidVMRepository.delete(record);
     }
 
     @Transactional(readOnly = true)
@@ -239,8 +256,8 @@ public class ConnectionManagerService {
     @Transactional
     public int refreshAndroidHealth() {
         int count = 0;
-        for (AndroidVM vm : androidVMRepository.findAll()) {
-            refreshAndroidVmStatus(vm);
+        for (AndroidVMRecord record : androidVMRepository.findAll()) {
+            refreshAndroidVmStatus(record);
             count++;
         }
         return count;
@@ -272,9 +289,9 @@ public class ConnectionManagerService {
 
     @Transactional
     public Map<String, Object> refreshAndroidHealth(Integer id) {
-        AndroidVM vm = getAndroidVmEntity(id);
-        refreshAndroidVmStatus(vm);
-        return androidVmMap(androidVMRepository.save(vm));
+        AndroidVMRecord record = getAndroidVmRecord(id);
+        refreshAndroidVmStatus(record);
+        return AndroidVmMapper.toFlatMap(androidVMRepository.save(record));
     }
 
     private void applyOllamaRequest(Ollama ollama, OllamaConnectionRequest request) {
@@ -314,7 +331,8 @@ public class ConnectionManagerService {
             .setGpuDevicesJson(writeJson(capability.getGpuDevices()));
     }
 
-    private void refreshAndroidVmStatus(AndroidVM vm) {
+    private void refreshAndroidVmStatus(AndroidVMRecord record) {
+        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(record));
         if (!hasText(vm.getContainerId()) || ConnectionStatusConstant.DELETED.equals(vm.getStatus())) {
             return;
         }
@@ -322,19 +340,17 @@ public class ConnectionManagerService {
             boolean running = dockerClient.isContainerRunning(vm.getDocker().getBaseUrl(), vm.getContainerId());
             if (!running) {
                 vm.setStatus(ConnectionStatusConstant.STOPPED);
-                return;
+            } else if (!ConnectionStatusConstant.READY.equals(vm.getStatus())) {
+                boolean portOpen = dockerClient.isTcpPortReachable(vm.getAdbHost(), vm.getAdbPort(), PORT_CHECK_TIMEOUT);
+                vm.setStatus(portOpen ? ConnectionStatusConstant.RUNNING : ConnectionStatusConstant.UNHEALTHY);
             }
-            if (ConnectionStatusConstant.READY.equals(vm.getStatus())) {
-                return;
-            }
-            boolean portOpen = dockerClient.isTcpPortReachable(vm.getAdbHost(), vm.getAdbPort(), PORT_CHECK_TIMEOUT);
-            vm.setStatus(portOpen ? ConnectionStatusConstant.RUNNING : ConnectionStatusConstant.UNHEALTHY);
         } catch (Exception ex) {
             vm.setStatus(ConnectionStatusConstant.UNHEALTHY);
         }
+        androidVMRepository.save(AndroidVmMapper.toRecord(vm));
     }
 
-    private AndroidVM getAndroidVmEntity(Integer id) {
+    private AndroidVMRecord getAndroidVmRecord(Integer id) {
         return androidVMRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Android VM not found"));
     }
 
@@ -352,10 +368,11 @@ public class ConnectionManagerService {
         return request;
     }
 
-    private String androidVmTaskContent(AndroidVM vm, CreateAndroidVMRequest request) {
+    private String androidVmTaskContent(Integer androidVmId, Integer dockerId, CreateAndroidVMRequest request) {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("androidVMId", vm.getId());
-        root.put("dockerId", vm.getDocker().getId());
+        root.put("androidVMId", androidVmId);
+        root.put("dockerId", dockerId);
+        root.put("vmType", RetroidAndroidVM.VM_TYPE);
         root.put("name", request.getName());
         root.put("image", request.getImage());
         root.put("accelerationMode", request.getAccelerationMode());
@@ -371,20 +388,11 @@ public class ConnectionManagerService {
         return root.toString();
     }
 
-    private Map<String, Object> androidVmMap(AndroidVM vm) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("id", vm.getId());
-        values.put("dockerId", vm.getDocker().getId());
-        values.put("dockerName", vm.getDocker().getName());
-        values.put("name", vm.getName());
-        values.put("image", vm.getImage());
-        values.put("containerId", vm.getContainerId());
-        values.put("containerName", vm.getContainerName());
-        values.put("adbHost", vm.getAdbHost());
-        values.put("adbPort", vm.getAdbPort());
-        values.put("accelerationMode", vm.getAccelerationMode());
-        values.put("status", vm.getStatus());
-        return values;
+    private RetroidAndroidVM asRetroid(dev.themajorones.models.entity.AndroidVM vm) {
+        if (vm instanceof RetroidAndroidVM retroid) {
+            return retroid;
+        }
+        throw new IllegalArgumentException("Unsupported Android VM type: " + vm.getVmType());
     }
 
     private Integer requireId(Integer value, String description) {

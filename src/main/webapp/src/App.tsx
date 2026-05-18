@@ -28,6 +28,7 @@ type Docker = {
 
 type AndroidVM = {
   id: number;
+  vmType: string;
   dockerId: number;
   dockerName: string;
   name: string;
@@ -37,7 +38,22 @@ type AndroidVM = {
   adbHost?: string;
   adbPort?: number;
   accelerationMode: string;
+  width?: number;
+  height?: number;
+  dpi?: number;
   status: string;
+};
+
+type AndroidVmDetail = {
+  androidVM: AndroidVM;
+  dockerInspectJson?: string | null;
+};
+
+type AuthInfo = {
+  login?: string;
+  name?: string;
+  avatarUrl?: string;
+  attributes?: Record<string, unknown>;
 };
 
 type TaskLog = {
@@ -58,6 +74,8 @@ type OllamaModel = {
 
 export function App() {
   const [tab, setTab] = useState<Tab>('ollama');
+  const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [ollama, setOllama] = useState<Ollama[]>([]);
   const [docker, setDocker] = useState<Docker[]>([]);
   const [android, setAndroid] = useState<AndroidVM[]>([]);
@@ -68,7 +86,7 @@ export function App() {
     docker: {},
     android: {},
   });
-  const [selectedVmDetail, setSelectedVmDetail] = useState('');
+  const [selectedVmDetail, setSelectedVmDetail] = useState<AndroidVmDetail | null>(null);
   const [status, setStatus] = useState('Idle');
 
   const [editingOllamaId, setEditingOllamaId] = useState<number | null>(null);
@@ -91,24 +109,45 @@ export function App() {
     name: 'redroid-1',
     image: 'redroid/redroid:15.0.0_64only-latest',
     accelerationMode: 'GUEST',
+    width: '720',
+    height: '1280',
+    dpi: '320',
   });
 
   useEffect(() => {
-    loadAllLists().catch((error) => setStatus(message(error)));
+    void bootstrap();
   }, []);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
     loadTab(tab).catch((error) => setStatus(message(error)));
-  }, [tab]);
+  }, [tab, authLoading]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
     const timer = window.setInterval(() => {
       refreshTabHealth(tab)
         .then(() => loadTab(tab))
         .catch((error) => setStatus(message(error)));
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [tab, ollama, docker, android]);
+  }, [tab, authLoading]);
+
+  async function bootstrap() {
+    try {
+      const info = await getJson<AuthInfo>('/auth/info');
+      setAuthInfo(info);
+      await loadAllLists();
+    } catch (error) {
+      window.location.href = '/oauth2/authorization/github';
+    } finally {
+      setAuthLoading(false);
+    }
+  }
 
   async function loadAllLists() {
     await Promise.allSettled([loadOllama(), loadDocker(), loadAndroid(), loadLogs()]);
@@ -211,9 +250,15 @@ export function App() {
       setStatus('Please select a Docker connection before saving the Android VM');
       return;
     }
+    const width = parseOptionalInteger(androidForm.width);
+    const height = parseOptionalInteger(androidForm.height);
+    const dpi = parseOptionalInteger(androidForm.dpi);
     const payload = {
       ...androidForm,
       dockerId,
+      width,
+      height,
+      dpi,
     };
     if (editingAndroidId == null) {
       await sendJson('/api/connections/android', 'POST', payload);
@@ -256,6 +301,9 @@ export function App() {
       name: row.name,
       image: row.image,
       accelerationMode: row.accelerationMode,
+      width: row.width == null ? '' : String(row.width),
+      height: row.height == null ? '' : String(row.height),
+      dpi: row.dpi == null ? '' : String(row.dpi),
     });
     setStatus('Editing Android VM');
   }
@@ -273,8 +321,8 @@ export function App() {
   }
 
   async function loadVmDetail(id: number) {
-    const detail = await getJson<unknown>(`/api/connections/android/${id}`);
-    setSelectedVmDetail(JSON.stringify(detail, null, 2));
+    const detail = await getJson<AndroidVmDetail>(`/api/connections/android/${id}`);
+    setSelectedVmDetail(detail);
   }
 
   function resetOllamaForm() {
@@ -295,6 +343,9 @@ export function App() {
       name: 'redroid-1',
       image: 'redroid/redroid:15.0.0_64only-latest',
       accelerationMode: 'GUEST',
+      width: '720',
+      height: '1280',
+      dpi: '320',
     });
   }
 
@@ -306,7 +357,13 @@ export function App() {
           <h1>Connection manager</h1>
         </div>
         <div className="button-row">
-          <a className="button-link" href="/oauth2/authorization/github">Sign in</a>
+          {authLoading ? (
+            <span className="auth-chip">Checking session</span>
+          ) : authInfo?.login ? (
+            <span className="auth-chip">Signed in as {authInfo.login}</span>
+          ) : (
+            <a className="button-link" href="/oauth2/authorization/github">Sign in</a>
+          )}
           <button type="button" onClick={() => loadTab(tab).then(() => setStatus('Loaded from database'))}>
             Load list
           </button>
@@ -413,6 +470,12 @@ export function App() {
         <section className="panel">
           <form className="form-grid" onSubmit={(event) => submitAndroid(event).catch((error) => setStatus(message(error)))}>
             <label>
+              Type
+              <select value="RETROID" disabled>
+                <option value="RETROID">Retroid</option>
+              </select>
+            </label>
+            <label>
               Docker
               <select value={androidForm.dockerId || docker[0]?.id || ''} onChange={(event) => setAndroidForm({ ...androidForm, dockerId: event.target.value })}>
                 {docker.map((item) => (
@@ -436,20 +499,95 @@ export function App() {
                 <option value="AUTO">AUTO</option>
               </select>
             </label>
-            <div className="button-row">
+            <fieldset className="field-group span-all">
+              <legend>Retroid options</legend>
+              <div className="form-grid compact-grid">
+                <label>
+                  Width
+                  <input
+                    inputMode="numeric"
+                    value={androidForm.width}
+                    onChange={(event) => setAndroidForm({ ...androidForm, width: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Height
+                  <input
+                    inputMode="numeric"
+                    value={androidForm.height}
+                    onChange={(event) => setAndroidForm({ ...androidForm, height: event.target.value })}
+                  />
+                </label>
+                <label>
+                  DPI
+                  <input
+                    inputMode="numeric"
+                    value={androidForm.dpi}
+                    onChange={(event) => setAndroidForm({ ...androidForm, dpi: event.target.value })}
+                  />
+                </label>
+              </div>
+            </fieldset>
+            <div className="button-row form-actions">
               <button type="submit">{editingAndroidId == null ? 'Create Android VM' : 'Update Android VM'}</button>
               {editingAndroidId != null && <button type="button" onClick={resetAndroidForm}>Cancel</button>}
             </div>
           </form>
           <DataTable
             rows={withLastHealthCheckedAt(android, 'android')}
-            columns={['name', 'dockerName', 'image', 'status', 'lastHealthCheckedAt', 'adbHost', 'adbPort', 'accelerationMode']}
+            columns={['name', 'vmType', 'dockerName', 'image', 'status', 'lastHealthCheckedAt', 'adbHost', 'adbPort', 'accelerationMode', 'width', 'height', 'dpi']}
             onDetail={(row) => loadVmDetail(row.id).catch((error) => setStatus(message(error)))}
             onEdit={editAndroid}
             onStop={(row) => stopVm(row.id).catch((error) => setStatus(message(error)))}
             onDelete={(row) => deleteVm(row.id).catch((error) => setStatus(message(error)))}
           />
-          {selectedVmDetail && <pre className="detail">{selectedVmDetail}</pre>}
+          {selectedVmDetail && (
+            <div className="detail-shell">
+              <div className="detail-grid">
+                <div>
+                  <span>Name</span>
+                  <strong>{selectedVmDetail.androidVM.name}</strong>
+                </div>
+                <div>
+                  <span>Docker</span>
+                  <strong>{selectedVmDetail.androidVM.dockerName}</strong>
+                </div>
+                <div>
+                  <span>Image</span>
+                  <strong>{selectedVmDetail.androidVM.image}</strong>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>{selectedVmDetail.androidVM.status}</strong>
+                </div>
+                <div>
+                  <span>VM type</span>
+                  <strong>{selectedVmDetail.androidVM.vmType}</strong>
+                </div>
+                <div>
+                  <span>Acceleration</span>
+                  <strong>{selectedVmDetail.androidVM.accelerationMode}</strong>
+                </div>
+                <div>
+                  <span>Width</span>
+                  <strong>{selectedVmDetail.androidVM.width ?? '-'}</strong>
+                </div>
+                <div>
+                  <span>Height</span>
+                  <strong>{selectedVmDetail.androidVM.height ?? '-'}</strong>
+                </div>
+                <div>
+                  <span>DPI</span>
+                  <strong>{selectedVmDetail.androidVM.dpi ?? '-'}</strong>
+                </div>
+                <div>
+                  <span>Container</span>
+                  <strong>{selectedVmDetail.androidVM.containerName || selectedVmDetail.androidVM.containerId || '-'}</strong>
+                </div>
+              </div>
+              {selectedVmDetail.dockerInspectJson && <pre className="detail">{selectedVmDetail.dockerInspectJson}</pre>}
+            </div>
+          )}
         </section>
       )}
 
@@ -532,6 +670,14 @@ function cellValue(row: Record<string, unknown>, column: string) {
 
 function label(tab: Tab) {
   return tab === 'android' ? 'Android VMs' : tab[0].toUpperCase() + tab.slice(1);
+}
+
+function parseOptionalInteger(value: string) {
+  if (!value.trim()) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 function message(error: unknown) {

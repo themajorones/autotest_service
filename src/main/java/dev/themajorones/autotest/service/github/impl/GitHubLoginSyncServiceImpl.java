@@ -65,7 +65,8 @@ public class GitHubLoginSyncServiceImpl implements GitHubLoginSyncService {
     }
 
     private void syncMemberships(GitHubUser user, List<GitHubOwnerResponse> organizations, long syncedAt) {
-        gitHubOwnerMembershipRepository.deleteAllByUser(user);
+        Integer userId = user.getId();
+        gitHubOwnerMembershipRepository.deleteAllByUserId(userId);
 
         Set<Long> seenOrgIds = new HashSet<>();
         for (GitHubOwnerResponse organization : organizations == null ? List.<GitHubOwnerResponse>of() : organizations) {
@@ -75,10 +76,12 @@ public class GitHubLoginSyncServiceImpl implements GitHubLoginSyncService {
             }
 
             GitHubOwner owner = upsertOwner(orgResponse, GitHubOwnerType.ORG, syncedAt);
-            gitHubOwnerMembershipRepository.save(new GitHubOwnerMembership()
-                .setUser(user)
-                .setOwner(owner)
-                .setSyncedAt(syncedAt));
+            if (!gitHubOwnerMembershipRepository.existsByUserIdAndOwnerId(userId, owner.getId())) {
+                gitHubOwnerMembershipRepository.save(new GitHubOwnerMembership()
+                    .setUser(user)
+                    .setOwner(owner)
+                    .setSyncedAt(syncedAt));
+            }
         }
     }
 
