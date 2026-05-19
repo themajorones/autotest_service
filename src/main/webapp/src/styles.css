@@ -34,6 +34,22 @@ button,
   text-decoration: none;
 }
 
+.text-button {
+  background: transparent;
+  border: 0;
+  color: #0b5cab;
+  cursor: pointer;
+  display: inline;
+  min-height: auto;
+  padding: 0;
+  text-align: left;
+}
+
+.text-button:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
 button:hover,
 .button-link:hover {
   background: #2e3d46;
@@ -261,6 +277,10 @@ pre {
   font-size: 0.95rem;
   font-weight: 650;
   margin-top: 3px;
+}
+
+.detail-grid strong .text-button {
+  color: inherit;
 }
 
 .request-status {

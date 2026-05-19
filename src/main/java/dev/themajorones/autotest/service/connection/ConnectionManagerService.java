@@ -1,7 +1,6 @@
 package dev.themajorones.autotest.service.connection;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,9 +24,9 @@ import dev.themajorones.models.dto.CreateAndroidVMRequest;
 import dev.themajorones.models.dto.DockerCapability;
 import dev.themajorones.models.dto.OllamaModelSummary;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
+import dev.themajorones.models.entity.AndroidVMRecord;
 import dev.themajorones.models.entity.Docker;
 import dev.themajorones.models.entity.Ollama;
-import dev.themajorones.models.entity.AndroidVMRecord;
 import dev.themajorones.models.entity.RetroidAndroidVM;
 import dev.themajorones.models.entity.TaskLog;
 import dev.themajorones.models.mapper.AndroidVmMapper;

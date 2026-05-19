@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { deleteResource, getJson, sendJson } from './api';
 
 type Tab = 'ollama' | 'docker' | 'android' | 'logs';
@@ -133,7 +134,7 @@ export function App() {
       refreshTabHealth(tab)
         .then(() => loadTab(tab))
         .catch((error) => setStatus(message(error)));
-    }, 30_000);
+    }, 15_000);
     return () => window.clearInterval(timer);
   }, [tab, authLoading]);
 
@@ -325,6 +326,11 @@ export function App() {
     setSelectedVmDetail(detail);
   }
 
+  async function copyText(value: string) {
+    await navigator.clipboard.writeText(value);
+    setStatus(`Copied ${value}`);
+  }
+
   function resetOllamaForm() {
     setEditingOllamaId(null);
     setModels([]);
@@ -363,14 +369,6 @@ export function App() {
             <span className="auth-chip">Signed in as {authInfo.login}</span>
           ) : (
             <a className="button-link" href="/oauth2/authorization/github">Sign in</a>
-          )}
-          <button type="button" onClick={() => loadTab(tab).then(() => setStatus('Loaded from database'))}>
-            Load list
-          </button>
-          {tab !== 'logs' && (
-            <button type="button" onClick={() => refreshTabHealth(tab).then(() => loadTab(tab)).then(() => setStatus('Health checked'))}>
-              Check health
-            </button>
           )}
         </div>
       </header>
@@ -426,7 +424,12 @@ export function App() {
           </form>
           <DataTable
             rows={withLastHealthCheckedAt(ollama, 'ollama')}
-            columns={['name', 'baseUrl', 'model', 'status', 'lastHealthCheckedAt', 'enabled']}
+            columns={['name', 'baseUrl', 'model', 'status', 'enabled']}
+            columnLabels={{
+              baseUrl: 'Base URL',
+              status: 'Status',
+              enabled: 'Enabled',
+            }}
             onEdit={editOllama}
             onDelete={(row) => deleteResource(`/api/connections/ollama/${row.id}`).then(loadOllama)}
           />
@@ -459,7 +462,13 @@ export function App() {
           </form>
           <DataTable
             rows={withLastHealthCheckedAt(docker, 'docker')}
-            columns={['name', 'baseUrl', 'status', 'lastHealthCheckedAt', 'apiVersion', 'os', 'arch', 'nvidiaRuntimeAvailable']}
+            columns={['name', 'baseUrl', 'status', 'apiVersion', 'os', 'arch', 'nvidiaRuntimeAvailable']}
+            columnLabels={{
+              baseUrl: 'Base URL',
+              status: 'Status',
+              apiVersion: 'API Version',
+              nvidiaRuntimeAvailable: 'NVIDIA Runtime',
+            }}
             onEdit={editDocker}
             onDelete={(row) => deleteResource(`/api/connections/docker/${row.id}`).then(loadDocker)}
           />
@@ -535,11 +544,33 @@ export function App() {
           </form>
           <DataTable
             rows={withLastHealthCheckedAt(android, 'android')}
-            columns={['name', 'vmType', 'dockerName', 'image', 'status', 'lastHealthCheckedAt', 'adbHost', 'adbPort', 'accelerationMode', 'width', 'height', 'dpi']}
+            columns={['name', 'vmType', 'dockerName', 'image', 'status', 'adbHost', 'accelerationMode', 'width']}
+            columnLabels={{
+              dockerName: 'Docker',
+              adbHost: 'Address',
+              accelerationMode: 'Acceleration',
+              width: 'Resolution',
+            }}
             onDetail={(row) => loadVmDetail(row.id).catch((error) => setStatus(message(error)))}
             onEdit={editAndroid}
             onStop={(row) => stopVm(row.id).catch((error) => setStatus(message(error)))}
             onDelete={(row) => deleteVm(row.id).catch((error) => setStatus(message(error)))}
+            renderCell={(row, column) => {
+              if (column === 'adbHost') {
+                const address = formatAndroidAddress(row as AndroidVM);
+                return address ? (
+                  <button type="button" className="text-button" onClick={() => copyText(address).catch((error) => setStatus(message(error)))}>
+                    {address}
+                  </button>
+                ) : (
+                  '-'
+                );
+              }
+              if (column === 'width') {
+                return formatAndroidResolution(row as AndroidVM);
+              }
+              return undefined;
+            }}
           />
           {selectedVmDetail && (
             <div className="detail-shell">
@@ -565,20 +596,29 @@ export function App() {
                   <strong>{selectedVmDetail.androidVM.vmType}</strong>
                 </div>
                 <div>
+                  <span>Address</span>
+                  <strong>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => {
+                        const address = formatAndroidAddress(selectedVmDetail.androidVM);
+                        if (address) {
+                          void copyText(address);
+                        }
+                      }}
+                    >
+                      {formatAndroidAddress(selectedVmDetail.androidVM) || '-'}
+                    </button>
+                  </strong>
+                </div>
+                <div>
                   <span>Acceleration</span>
                   <strong>{selectedVmDetail.androidVM.accelerationMode}</strong>
                 </div>
                 <div>
-                  <span>Width</span>
-                  <strong>{selectedVmDetail.androidVM.width ?? '-'}</strong>
-                </div>
-                <div>
-                  <span>Height</span>
-                  <strong>{selectedVmDetail.androidVM.height ?? '-'}</strong>
-                </div>
-                <div>
-                  <span>DPI</span>
-                  <strong>{selectedVmDetail.androidVM.dpi ?? '-'}</strong>
+                  <span>Resolution</span>
+                  <strong>{formatAndroidResolution(selectedVmDetail.androidVM)}</strong>
                 </div>
                 <div>
                   <span>Container</span>
@@ -593,7 +633,19 @@ export function App() {
 
       {tab === 'logs' && (
         <section className="panel">
-          <DataTable rows={logs} columns={['id', 'type', 'status', 'startedAt', 'endedAt', 'content', 'result']} />
+          <DataTable
+            rows={logs}
+            columns={['id', 'type', 'status', 'startedAt', 'endedAt', 'content', 'result']}
+            columnLabels={{
+              id: 'ID',
+              type: 'Type',
+              status: 'Status',
+              startedAt: 'Started',
+              endedAt: 'Ended',
+              content: 'Message',
+              result: 'Result',
+            }}
+          />
         </section>
       )}
 
@@ -605,6 +657,8 @@ export function App() {
 function DataTable<T extends { id: number }>({
   rows,
   columns,
+  columnLabels,
+  renderCell,
   onDelete,
   onDetail,
   onEdit,
@@ -612,6 +666,8 @@ function DataTable<T extends { id: number }>({
 }: {
   rows: T[];
   columns: string[];
+  columnLabels?: Record<string, string>;
+  renderCell?: (row: T, column: string) => ReactNode;
   onDelete?: (row: T) => void;
   onDetail?: (row: T) => void;
   onEdit?: (row: T) => void;
@@ -622,7 +678,7 @@ function DataTable<T extends { id: number }>({
       <table>
         <thead>
           <tr>
-            {columns.map((column) => <th key={column}>{column}</th>)}
+            {columns.map((column) => <th key={column}>{columnLabels?.[column] ?? column}</th>)}
             {(onDelete || onDetail || onEdit || onStop) && <th>actions</th>}
           </tr>
         </thead>
@@ -634,7 +690,10 @@ function DataTable<T extends { id: number }>({
           )}
           {rows.map((row) => (
             <tr key={row.id}>
-              {columns.map((column) => <td key={column}>{cellValue(row, column)}</td>)}
+              {columns.map((column) => {
+                const rendered = renderCell?.(row, column);
+                return <td key={column}>{rendered === undefined ? cellValue(row, column) : rendered}</td>;
+              })}
               {(onDelete || onDetail || onEdit || onStop) && (
                 <td>
                   <div className="table-actions">
@@ -666,6 +725,23 @@ function cellValue(row: Record<string, unknown>, column: string) {
   }
   const text = String(value);
   return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+}
+
+function formatAndroidAddress(androidVm: Pick<AndroidVM, 'adbHost' | 'adbPort'>) {
+  if (!androidVm.adbHost || androidVm.adbPort == null) {
+    return '';
+  }
+  return `${androidVm.adbHost}:${androidVm.adbPort}`;
+}
+
+function formatAndroidResolution(androidVm: Pick<AndroidVM, 'width' | 'height' | 'dpi'>) {
+  if (androidVm.width == null && androidVm.height == null && androidVm.dpi == null) {
+    return '-';
+  }
+  const width = androidVm.width ?? '?';
+  const height = androidVm.height ?? '?';
+  const dpi = androidVm.dpi ?? '?';
+  return `${width}x${height}@${dpi}`;
 }
 
 function label(tab: Tab) {
