@@ -480,8 +480,8 @@ export function App() {
           <form className="form-grid" onSubmit={(event) => submitAndroid(event).catch((error) => setStatus(message(error)))}>
             <label>
               Type
-              <select value="RETROID" disabled>
-                <option value="RETROID">Retroid</option>
+              <select value="REDROID" disabled>
+                <option value="REDROID">Redroid</option>
               </select>
             </label>
             <label>
@@ -509,7 +509,7 @@ export function App() {
               </select>
             </label>
             <fieldset className="field-group span-all">
-              <legend>Retroid options</legend>
+              <legend>Redroid options</legend>
               <div className="form-grid compact-grid">
                 <label>
                   Width

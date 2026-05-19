@@ -27,7 +27,7 @@ import dev.themajorones.models.dto.TaskCommandEnvelope;
 import dev.themajorones.models.entity.AndroidVMRecord;
 import dev.themajorones.models.entity.Docker;
 import dev.themajorones.models.entity.Ollama;
-import dev.themajorones.models.entity.RetroidAndroidVM;
+import dev.themajorones.models.entity.RedroidAndroidVM;
 import dev.themajorones.models.entity.TaskLog;
 import dev.themajorones.models.mapper.AndroidVmMapper;
 import lombok.RequiredArgsConstructor;
@@ -126,7 +126,7 @@ public class ConnectionManagerService {
     @Transactional
     public Map<String, Object> updateAndroidVM(Integer id, CreateAndroidVMRequest request) {
         AndroidVMRecord record = getAndroidVmRecord(id);
-        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(record));
+        RedroidAndroidVM vm = asRedroid(AndroidVmMapper.fromRecord(record));
         CreateAndroidVMRequest normalized = normalizeAndroidRequest(request);
         vm
             .setDocker(getDocker(requireId(normalized.getDockerId(), "Docker connection id")))
@@ -161,7 +161,7 @@ public class ConnectionManagerService {
         Docker docker = getDocker(requireId(request.getDockerId(), "Docker connection id"));
         CreateAndroidVMRequest normalized = normalizeAndroidRequest(request);
         normalized.setName(requireText(normalized.getName(), "Android VM name"));
-        RetroidAndroidVM vm = AndroidVmMapper.fromRequest(
+        RedroidAndroidVM vm = AndroidVmMapper.fromRequest(
             normalized,
             docker,
             ConnectionStatusConstant.QUEUED
@@ -191,7 +191,7 @@ public class ConnectionManagerService {
 
     @Transactional
     public Map<String, Object> stopAndroidVM(Integer id) {
-        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(getAndroidVmRecord(id)));
+        RedroidAndroidVM vm = asRedroid(AndroidVmMapper.fromRecord(getAndroidVmRecord(id)));
         if (hasText(vm.getContainerId())) {
             dockerClient.stopContainer(vm.getDocker().getBaseUrl(), vm.getContainerId());
         }
@@ -202,7 +202,7 @@ public class ConnectionManagerService {
     @Transactional
     public void deleteAndroidVM(Integer id) {
         AndroidVMRecord record = getAndroidVmRecord(id);
-        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(record));
+        RedroidAndroidVM vm = asRedroid(AndroidVmMapper.fromRecord(record));
         if (hasText(vm.getContainerId())) {
             dockerClient.removeContainer(vm.getDocker().getBaseUrl(), vm.getContainerId());
         }
@@ -331,7 +331,7 @@ public class ConnectionManagerService {
     }
 
     private void refreshAndroidVmStatus(AndroidVMRecord record) {
-        RetroidAndroidVM vm = asRetroid(AndroidVmMapper.fromRecord(record));
+        RedroidAndroidVM vm = asRedroid(AndroidVmMapper.fromRecord(record));
         if (!hasText(vm.getContainerId()) || ConnectionStatusConstant.DELETED.equals(vm.getStatus())) {
             return;
         }
@@ -371,7 +371,7 @@ public class ConnectionManagerService {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("androidVMId", androidVmId);
         root.put("dockerId", dockerId);
-        root.put("vmType", RetroidAndroidVM.VM_TYPE);
+        root.put("vmType", RedroidAndroidVM.VM_TYPE);
         root.put("name", request.getName());
         root.put("image", request.getImage());
         root.put("accelerationMode", request.getAccelerationMode());
@@ -387,9 +387,9 @@ public class ConnectionManagerService {
         return root.toString();
     }
 
-    private RetroidAndroidVM asRetroid(dev.themajorones.models.entity.AndroidVM vm) {
-        if (vm instanceof RetroidAndroidVM retroid) {
-            return retroid;
+    private RedroidAndroidVM asRedroid(dev.themajorones.models.entity.AndroidVM vm) {
+        if (vm instanceof RedroidAndroidVM redroid) {
+            return redroid;
         }
         throw new IllegalArgumentException("Unsupported Android VM type: " + vm.getVmType());
     }
