@@ -13,7 +13,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import dev.themajorones.autotest.dto.connection.DockerConnectionRequest;
-import dev.themajorones.autotest.service.connection.ConnectionManagerService;
+import dev.themajorones.autotest.dto.connection.HealthCheckRequest;
+import dev.themajorones.autotest.service.resource.DockerService;
 import dev.themajorones.models.entity.Docker;
 import lombok.RequiredArgsConstructor;
 
@@ -21,7 +22,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class DockerResource {
 
-    private final ConnectionManagerService service;
+    private final DockerService service;
 
     @GetMapping("/api/connections/docker")
     public List<Docker> listDocker() {
@@ -29,8 +30,8 @@ public class DockerResource {
     }
 
     @PostMapping("/api/connections/docker")
-    public Docker createDocker(@RequestBody DockerConnectionRequest request) {
-        return service.createDocker(request);
+    public Docker connectDocker(@RequestBody DockerConnectionRequest request) {
+        return service.connectDocker(request);
     }
 
     @GetMapping("/api/connections/docker/{id}")
@@ -50,12 +51,7 @@ public class DockerResource {
     }
 
     @PostMapping("/api/connections/docker/health")
-    public Map<String, Object> refreshDockerHealth() {
-        return Map.of("checked", service.refreshDockerHealth());
-    }
-
-    @PostMapping("/api/connections/docker/{id}/health")
-    public Docker refreshDockerHealth(@PathVariable Integer id) {
-        return service.refreshDockerHealth(id);
+    public List<Map<String, Object>> checkHealth(@RequestBody HealthCheckRequest request) {
+        return service.checkHealth(request.getIds());
     }
 }

@@ -5,10 +5,10 @@ import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-import dev.themajorones.models.entity.AndroidVMRecord;
+import dev.themajorones.models.entity.Android;
 
 @Repository
-public interface AndroidVMRepository extends JpaRepository<AndroidVMRecord, Integer> {
+public interface AndroidRepository extends JpaRepository<Android, Integer> {
 
-    List<AndroidVMRecord> findAllByOrderByIdDesc();
+    List<Android> findAllByOrderByIdDesc();
 }

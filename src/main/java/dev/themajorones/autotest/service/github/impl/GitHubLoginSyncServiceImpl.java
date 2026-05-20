@@ -18,6 +18,7 @@ import dev.themajorones.models.entity.GitHubOwner;
 import dev.themajorones.models.entity.GitHubOwnerMembership;
 import dev.themajorones.models.entity.GitHubOwnerType;
 import dev.themajorones.models.entity.GitHubUser;
+import dev.themajorones.models.util.ValidationUtils;
 
 @Service
 public class GitHubLoginSyncServiceImpl implements GitHubLoginSyncService {
@@ -87,8 +88,8 @@ public class GitHubLoginSyncServiceImpl implements GitHubLoginSyncService {
 
     private GitHubOwner upsertOwner(GitHubOwnerResponse response, GitHubOwnerType fallbackType, long syncedAt) {
         GitHubOwnerType ownerType = resolveOwnerType(response.getType(), fallbackType);
-        String login = requireText(response.getLogin(), "GitHub owner login");
-        Long githubId = requireId(response.getId(), "GitHub owner id");
+        String login = ValidationUtils.requireText(response.getLogin(), "GitHub owner login");
+        Long githubId = ValidationUtils.requireId(response.getId(), "GitHub owner id");
         String displayName = response.getName() == null || response.getName().isBlank() ? login : response.getName().trim();
 
         GitHubOwner owner = gitHubOwnerRepository.findByGithubId(githubId)
@@ -121,17 +122,4 @@ public class GitHubLoginSyncServiceImpl implements GitHubLoginSyncService {
         return response;
     }
 
-    private Long requireId(Long value, String description) {
-        if (value == null) {
-            throw new IllegalStateException(description + " is required");
-        }
-        return value;
-    }
-
-    private String requireText(String value, String description) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException(description + " is required");
-        }
-        return value.trim();
-    }
 }

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { deleteResource, getJson, sendJson } from './api';
 
@@ -10,7 +10,7 @@ type Ollama = {
   name: string;
   baseUrl: string;
   enabled: boolean;
-  status: string;
+  status?: string;
   model: string;
 };
 
@@ -19,17 +19,17 @@ type Docker = {
   name: string;
   baseUrl: string;
   enabled: boolean;
-  status: string;
+  status?: string;
   apiVersion?: string;
   os?: string;
   arch?: string;
-  nvidiaRuntimeAvailable: boolean;
+  graphicsRuntimesJson?: string;
   gpuDevicesJson?: string;
 };
 
-type AndroidVM = {
+type Android = {
   id: number;
-  vmType: string;
+  type: string;
   dockerId: number;
   dockerName: string;
   name: string;
@@ -42,11 +42,11 @@ type AndroidVM = {
   width?: number;
   height?: number;
   dpi?: number;
-  status: string;
+  status?: string;
 };
 
-type AndroidVmDetail = {
-  androidVM: AndroidVM;
+type AndroidDetail = {
+  android: Android;
   dockerInspectJson?: string | null;
 };
 
@@ -73,13 +73,23 @@ type OllamaModel = {
   size: number;
 };
 
+type HealthResponse = {
+  type: HealthTab;
+  id: number;
+  status: string;
+};
+
+type HealthCheckRequest = {
+  ids: number[];
+};
+
 export function App() {
   const [tab, setTab] = useState<Tab>('ollama');
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [ollama, setOllama] = useState<Ollama[]>([]);
   const [docker, setDocker] = useState<Docker[]>([]);
-  const [android, setAndroid] = useState<AndroidVM[]>([]);
+  const [android, setAndroid] = useState<Android[]>([]);
   const [logs, setLogs] = useState<TaskLog[]>([]);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [lastHealthChecks, setLastHealthChecks] = useState<Record<HealthTab, Record<number, number>>>({
@@ -87,8 +97,16 @@ export function App() {
     docker: {},
     android: {},
   });
-  const [selectedVmDetail, setSelectedVmDetail] = useState<AndroidVmDetail | null>(null);
+  const [healthStatuses, setHealthStatuses] = useState<Record<HealthTab, Record<number, string>>>({
+    ollama: {},
+    docker: {},
+    android: {},
+  });
+  const [selectedAndroidDetail, setSelectedAndroidDetail] = useState<AndroidDetail | null>(null);
   const [status, setStatus] = useState('Idle');
+  const ollamaRef = useRef<Ollama[]>([]);
+  const dockerRef = useRef<Docker[]>([]);
+  const androidRef = useRef<Android[]>([]);
 
   const [editingOllamaId, setEditingOllamaId] = useState<number | null>(null);
   const [editingDockerId, setEditingDockerId] = useState<number | null>(null);
@@ -123,8 +141,22 @@ export function App() {
     if (authLoading) {
       return;
     }
-    loadTab(tab).catch((error) => setStatus(message(error)));
+    loadTab(tab)
+      .then(() => refreshTabHealth(tab))
+      .catch((error) => setStatus(message(error)));
   }, [tab, authLoading]);
+
+  useEffect(() => {
+    ollamaRef.current = ollama;
+  }, [ollama]);
+
+  useEffect(() => {
+    dockerRef.current = docker;
+  }, [docker]);
+
+  useEffect(() => {
+    androidRef.current = android;
+  }, [android]);
 
   useEffect(() => {
     if (authLoading) {
@@ -132,9 +164,8 @@ export function App() {
     }
     const timer = window.setInterval(() => {
       refreshTabHealth(tab)
-        .then(() => loadTab(tab))
         .catch((error) => setStatus(message(error)));
-    }, 15_000);
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, [tab, authLoading]);
 
@@ -142,16 +173,11 @@ export function App() {
     try {
       const info = await getJson<AuthInfo>('/auth/info');
       setAuthInfo(info);
-      await loadAllLists();
     } catch (error) {
       window.location.href = '/oauth2/authorization/github';
     } finally {
       setAuthLoading(false);
     }
-  }
-
-  async function loadAllLists() {
-    await Promise.allSettled([loadOllama(), loadDocker(), loadAndroid(), loadLogs()]);
   }
 
   async function loadTab(nextTab: Tab) {
@@ -170,42 +196,66 @@ export function App() {
     if (nextTab === 'logs') {
       return;
     }
-    await sendJson(`/api/connections/${nextTab}/health`, 'POST');
-    markHealthChecked(nextTab);
+    const rows = rowsForHealthTab(nextTab);
+    if (rows.length === 0) {
+      return;
+    }
+    const payload: HealthCheckRequest = { ids: rows.map((row) => row.id) };
+    const checks = await sendJson<HealthResponse[]>(`/api/connections/${nextTab}/health`, 'POST', payload);
+    markHealthChecked(nextTab, checks);
   }
 
   async function loadOllama() {
-    setOllama(await getJson<Ollama[]>('/api/connections/ollama'));
+    const rows = await getJson<Ollama[]>('/api/connections/ollama');
+    ollamaRef.current = rows;
+    setOllama(rows);
   }
 
   async function loadDocker() {
-    setDocker(await getJson<Docker[]>('/api/connections/docker'));
+    const rows = await getJson<Docker[]>('/api/connections/docker');
+    dockerRef.current = rows;
+    setDocker(rows);
   }
 
   async function loadAndroid() {
-    setAndroid(await getJson<AndroidVM[]>('/api/connections/android'));
+    const rows = await getJson<Android[]>('/api/connections/android');
+    androidRef.current = rows;
+    setAndroid(rows);
   }
 
   async function loadLogs() {
     setLogs(await getJson<TaskLog[]>('/api/task-logs'));
   }
 
-  function markHealthChecked(nextTab: HealthTab) {
-    const rows = nextTab === 'ollama' ? ollama : nextTab === 'docker' ? docker : android;
+  function markHealthChecked(nextTab: HealthTab, checks: HealthResponse[]) {
     const checkedAt = Date.now();
+    const ids = checks.map((check) => check.id);
     setLastHealthChecks((current) => ({
       ...current,
-      [nextTab]: rows.reduce<Record<number, number>>((checks, row) => {
-        checks[row.id] = checkedAt;
+      [nextTab]: ids.reduce<Record<number, number>>((checks, id) => {
+        checks[id] = checkedAt;
         return checks;
+      }, { ...current[nextTab] }),
+    }));
+    setHealthStatuses((current) => ({
+      ...current,
+      [nextTab]: checks.reduce<Record<number, string>>((statuses, check) => {
+        statuses[check.id] = check.status;
+        return statuses;
       }, { ...current[nextTab] }),
     }));
   }
 
+  function rowsForHealthTab(nextTab: HealthTab) {
+    return nextTab === 'ollama' ? ollamaRef.current : nextTab === 'docker' ? dockerRef.current : androidRef.current;
+  }
+
   function withLastHealthCheckedAt<T extends { id: number }>(rows: T[], nextTab: HealthTab) {
     const checks = lastHealthChecks[nextTab];
+    const statuses = healthStatuses[nextTab];
     return rows.map((row) => ({
       ...row,
+      status: statuses[row.id],
       lastHealthCheckedAt: checks[row.id],
     }));
   }
@@ -248,7 +298,7 @@ export function App() {
     const selectedDockerId = androidForm.dockerId || docker[0]?.id;
     const dockerId = Number(selectedDockerId);
     if (!selectedDockerId || Number.isNaN(dockerId)) {
-      setStatus('Please select a Docker connection before saving the Android VM');
+      setStatus('Please select a Docker connection before saving the Android');
       return;
     }
     const width = parseOptionalInteger(androidForm.width);
@@ -263,10 +313,10 @@ export function App() {
     };
     if (editingAndroidId == null) {
       await sendJson('/api/connections/android', 'POST', payload);
-      setStatus('Android VM creation queued');
+      setStatus('Android creation queued');
     } else {
       await sendJson(`/api/connections/android/${editingAndroidId}`, 'PUT', payload);
-      setStatus('Android VM saved');
+      setStatus('Android saved');
     }
     resetAndroidForm();
     await loadAndroid();
@@ -295,7 +345,7 @@ export function App() {
     setStatus('Editing Docker connection');
   }
 
-  function editAndroid(row: AndroidVM) {
+  function editAndroid(row: Android) {
     setEditingAndroidId(row.id);
     setAndroidForm({
       dockerId: String(row.dockerId),
@@ -306,24 +356,31 @@ export function App() {
       height: row.height == null ? '' : String(row.height),
       dpi: row.dpi == null ? '' : String(row.dpi),
     });
-    setStatus('Editing Android VM');
+    setStatus('Editing Android');
   }
 
-  async function stopVm(id: number) {
-    await sendJson(`/api/connections/android/${id}/stop`, 'POST');
+  async function stopAndroid(id: number) {
+    const stopped = await sendJson<Android>(`/api/connections/android/${id}/stop`, 'POST');
     await loadAndroid();
-    setStatus('Android VM stopped');
+    setHealthStatuses((current) => ({
+      ...current,
+      android: {
+        ...current.android,
+        [id]: stopped.status || 'STOPPED',
+      },
+    }));
+    setStatus('Android stopped');
   }
 
-  async function deleteVm(id: number) {
+  async function deleteAndroid(id: number) {
     await deleteResource(`/api/connections/android/${id}`);
     await loadAndroid();
-    setStatus('Android VM deleted');
+    setStatus('Android deleted');
   }
 
-  async function loadVmDetail(id: number) {
-    const detail = await getJson<AndroidVmDetail>(`/api/connections/android/${id}`);
-    setSelectedVmDetail(detail);
+  async function loadAndroidDetail(id: number) {
+    const detail = await getJson<AndroidDetail>(`/api/connections/android/${id}`);
+    setSelectedAndroidDetail(detail);
   }
 
   async function copyText(value: string) {
@@ -462,15 +519,21 @@ export function App() {
           </form>
           <DataTable
             rows={withLastHealthCheckedAt(docker, 'docker')}
-            columns={['name', 'baseUrl', 'status', 'apiVersion', 'os', 'arch', 'nvidiaRuntimeAvailable']}
+            columns={['name', 'baseUrl', 'status', 'apiVersion', 'os', 'arch', 'graphicsRuntimesJson']}
             columnLabels={{
               baseUrl: 'Base URL',
               status: 'Status',
               apiVersion: 'API Version',
-              nvidiaRuntimeAvailable: 'NVIDIA Runtime',
+              graphicsRuntimesJson: 'Graphics Runtime',
             }}
             onEdit={editDocker}
             onDelete={(row) => deleteResource(`/api/connections/docker/${row.id}`).then(loadDocker)}
+            renderCell={(row, column) => {
+              if (column === 'graphicsRuntimesJson') {
+                return formatJsonList((row as Docker).graphicsRuntimesJson);
+              }
+              return undefined;
+            }}
           />
         </section>
       )}
@@ -538,26 +601,26 @@ export function App() {
               </div>
             </fieldset>
             <div className="button-row form-actions">
-              <button type="submit">{editingAndroidId == null ? 'Create Android VM' : 'Update Android VM'}</button>
+              <button type="submit">{editingAndroidId == null ? 'Create Android' : 'Update Android'}</button>
               {editingAndroidId != null && <button type="button" onClick={resetAndroidForm}>Cancel</button>}
             </div>
           </form>
           <DataTable
             rows={withLastHealthCheckedAt(android, 'android')}
-            columns={['name', 'vmType', 'dockerName', 'image', 'status', 'adbHost', 'accelerationMode', 'width']}
+            columns={['name', 'type', 'dockerName', 'image', 'status', 'adbHost', 'accelerationMode', 'width']}
             columnLabels={{
               dockerName: 'Docker',
               adbHost: 'Address',
               accelerationMode: 'Acceleration',
               width: 'Resolution',
             }}
-            onDetail={(row) => loadVmDetail(row.id).catch((error) => setStatus(message(error)))}
+            onDetail={(row) => loadAndroidDetail(row.id).catch((error) => setStatus(message(error)))}
             onEdit={editAndroid}
-            onStop={(row) => stopVm(row.id).catch((error) => setStatus(message(error)))}
-            onDelete={(row) => deleteVm(row.id).catch((error) => setStatus(message(error)))}
+            onStop={(row) => stopAndroid(row.id).catch((error) => setStatus(message(error)))}
+            onDelete={(row) => deleteAndroid(row.id).catch((error) => setStatus(message(error)))}
             renderCell={(row, column) => {
               if (column === 'adbHost') {
-                const address = formatAndroidAddress(row as AndroidVM);
+                const address = formatAndroidAddress(row as Android);
                 return address ? (
                   <button type="button" className="text-button" onClick={() => copyText(address).catch((error) => setStatus(message(error)))}>
                     {address}
@@ -567,33 +630,33 @@ export function App() {
                 );
               }
               if (column === 'width') {
-                return formatAndroidResolution(row as AndroidVM);
+                return formatAndroidResolution(row as Android);
               }
               return undefined;
             }}
           />
-          {selectedVmDetail && (
+          {selectedAndroidDetail && (
             <div className="detail-shell">
               <div className="detail-grid">
                 <div>
                   <span>Name</span>
-                  <strong>{selectedVmDetail.androidVM.name}</strong>
+                  <strong>{selectedAndroidDetail.android.name}</strong>
                 </div>
                 <div>
                   <span>Docker</span>
-                  <strong>{selectedVmDetail.androidVM.dockerName}</strong>
+                  <strong>{selectedAndroidDetail.android.dockerName}</strong>
                 </div>
                 <div>
                   <span>Image</span>
-                  <strong>{selectedVmDetail.androidVM.image}</strong>
+                  <strong>{selectedAndroidDetail.android.image}</strong>
                 </div>
                 <div>
                   <span>Status</span>
-                  <strong>{selectedVmDetail.androidVM.status}</strong>
+                  <strong>{healthStatuses.android[selectedAndroidDetail.android.id] || '-'}</strong>
                 </div>
                 <div>
-                  <span>VM type</span>
-                  <strong>{selectedVmDetail.androidVM.vmType}</strong>
+                  <span>Type</span>
+                  <strong>{selectedAndroidDetail.android.type}</strong>
                 </div>
                 <div>
                   <span>Address</span>
@@ -602,30 +665,30 @@ export function App() {
                       type="button"
                       className="text-button"
                       onClick={() => {
-                        const address = formatAndroidAddress(selectedVmDetail.androidVM);
+                        const address = formatAndroidAddress(selectedAndroidDetail.android);
                         if (address) {
                           void copyText(address);
                         }
                       }}
                     >
-                      {formatAndroidAddress(selectedVmDetail.androidVM) || '-'}
+                      {formatAndroidAddress(selectedAndroidDetail.android) || '-'}
                     </button>
                   </strong>
                 </div>
                 <div>
                   <span>Acceleration</span>
-                  <strong>{selectedVmDetail.androidVM.accelerationMode}</strong>
+                  <strong>{selectedAndroidDetail.android.accelerationMode}</strong>
                 </div>
                 <div>
                   <span>Resolution</span>
-                  <strong>{formatAndroidResolution(selectedVmDetail.androidVM)}</strong>
+                  <strong>{formatAndroidResolution(selectedAndroidDetail.android)}</strong>
                 </div>
                 <div>
                   <span>Container</span>
-                  <strong>{selectedVmDetail.androidVM.containerName || selectedVmDetail.androidVM.containerId || '-'}</strong>
+                  <strong>{selectedAndroidDetail.android.containerName || selectedAndroidDetail.android.containerId || '-'}</strong>
                 </div>
               </div>
-              {selectedVmDetail.dockerInspectJson && <pre className="detail">{selectedVmDetail.dockerInspectJson}</pre>}
+              {selectedAndroidDetail.dockerInspectJson && <pre className="detail">{selectedAndroidDetail.dockerInspectJson}</pre>}
             </div>
           )}
         </section>
@@ -727,25 +790,40 @@ function cellValue(row: Record<string, unknown>, column: string) {
   return text.length > 140 ? `${text.slice(0, 140)}...` : text;
 }
 
-function formatAndroidAddress(androidVm: Pick<AndroidVM, 'adbHost' | 'adbPort'>) {
-  if (!androidVm.adbHost || androidVm.adbPort == null) {
+function formatAndroidAddress(android: Pick<Android, 'adbHost' | 'adbPort'>) {
+  if (!android.adbHost || android.adbPort == null) {
     return '';
   }
-  return `${androidVm.adbHost}:${androidVm.adbPort}`;
+  return `${android.adbHost}:${android.adbPort}`;
 }
 
-function formatAndroidResolution(androidVm: Pick<AndroidVM, 'width' | 'height' | 'dpi'>) {
-  if (androidVm.width == null && androidVm.height == null && androidVm.dpi == null) {
+function formatAndroidResolution(android: Pick<Android, 'width' | 'height' | 'dpi'>) {
+  if (android.width == null && android.height == null && android.dpi == null) {
     return '-';
   }
-  const width = androidVm.width ?? '?';
-  const height = androidVm.height ?? '?';
-  const dpi = androidVm.dpi ?? '?';
+  const width = android.width ?? '?';
+  const height = android.height ?? '?';
+  const dpi = android.dpi ?? '?';
   return `${width}x${height}@${dpi}`;
 }
 
+function formatJsonList(value?: string) {
+  if (!value) {
+    return '-';
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.join(', ');
+    }
+  } catch {
+    return value;
+  }
+  return '-';
+}
+
 function label(tab: Tab) {
-  return tab === 'android' ? 'Android VMs' : tab[0].toUpperCase() + tab.slice(1);
+  return tab === 'android' ? 'Android' : tab[0].toUpperCase() + tab.slice(1);
 }
 
 function parseOptionalInteger(value: string) {

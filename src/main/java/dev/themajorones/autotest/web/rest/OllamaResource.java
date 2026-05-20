@@ -12,8 +12,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import dev.themajorones.autotest.dto.connection.HealthCheckRequest;
 import dev.themajorones.autotest.dto.connection.OllamaConnectionRequest;
-import dev.themajorones.autotest.service.connection.ConnectionManagerService;
+import dev.themajorones.autotest.service.resource.OllamaService;
 import dev.themajorones.models.dto.OllamaModelSummary;
 import dev.themajorones.models.entity.Ollama;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +23,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class OllamaResource {
 
-    private final ConnectionManagerService service;
+    private final OllamaService service;
 
     @GetMapping("/api/connections/ollama")
     public List<Ollama> listOllama() {
@@ -30,8 +31,8 @@ public class OllamaResource {
     }
 
     @PostMapping("/api/connections/ollama")
-    public Ollama createOllama(@RequestBody OllamaConnectionRequest request) {
-        return service.createOllama(request);
+    public Ollama connectOllama(@RequestBody OllamaConnectionRequest request) {
+        return service.connectOllama(request);
     }
 
     @GetMapping("/api/connections/ollama/{id}")
@@ -50,16 +51,6 @@ public class OllamaResource {
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/api/connections/ollama/health")
-    public Map<String, Object> refreshOllamaHealth() {
-        return Map.of("checked", service.refreshOllamaHealth());
-    }
-
-    @PostMapping("/api/connections/ollama/{id}/health")
-    public Ollama refreshOllamaHealth(@PathVariable Integer id) {
-        return service.refreshOllamaHealth(id);
-    }
-
     @GetMapping("/api/connections/ollama/{id}/models")
     public List<OllamaModelSummary> listOllamaModels(@PathVariable Integer id) {
         return service.listOllamaModels(id);
@@ -68,5 +59,10 @@ public class OllamaResource {
     @PostMapping("/api/connections/ollama/models")
     public List<OllamaModelSummary> listOllamaModelsForBaseUrl(@RequestBody OllamaConnectionRequest request) {
         return service.listOllamaModels(request.getBaseUrl());
+    }
+
+    @PostMapping("/api/connections/ollama/health")
+    public List<Map<String, Object>> checkHealth(@RequestBody HealthCheckRequest request) {
+        return service.checkHealth(request.getIds());
     }
 }

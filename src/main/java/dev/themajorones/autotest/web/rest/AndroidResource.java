@@ -12,67 +12,51 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import dev.themajorones.autotest.service.connection.ConnectionManagerService;
-import dev.themajorones.models.dto.AndroidVMDetail;
-import dev.themajorones.models.dto.CreateAndroidVMRequest;
+import dev.themajorones.autotest.dto.connection.HealthCheckRequest;
+import dev.themajorones.autotest.service.resource.AndroidService;
+import dev.themajorones.models.dto.AndroidDetail;
+import dev.themajorones.models.dto.CreateAndroidRequest;
 import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
 public class AndroidResource {
 
-    private final ConnectionManagerService service;
+    private final AndroidService service;
 
     @GetMapping("/api/connections/android")
-    public List<Map<String, Object>> listAndroidVMs() {
-        return service.listAndroidVMs();
+    public List<Map<String, Object>> listAndroid() {
+        return service.listAndroid();
     }
 
     @PostMapping("/api/connections/android")
-    public ResponseEntity<Map<String, Object>> createAndroidVM(@RequestBody CreateAndroidVMRequest request) {
-        return ResponseEntity.accepted().body(service.createAndroidVM(request));
+    public ResponseEntity<Map<String, Object>> createAndroid(@RequestBody CreateAndroidRequest request) {
+        return ResponseEntity.accepted().body(service.createAndroid(request));
     }
 
     @PutMapping("/api/connections/android/{id}")
-    public Map<String, Object> updateAndroidVM(@PathVariable Integer id, @RequestBody CreateAndroidVMRequest request) {
-        return service.updateAndroidVM(id, request);
+    public Map<String, Object> updateAndroid(@PathVariable Integer id, @RequestBody CreateAndroidRequest request) {
+        return service.updateAndroid(id, request);
     }
 
     @GetMapping("/api/connections/android/{id}")
-    public AndroidVMDetail getAndroidVM(@PathVariable Integer id) {
-        return service.getAndroidVM(id);
+    public AndroidDetail getAndroid(@PathVariable Integer id) {
+        return service.getAndroid(id);
     }
 
     @PostMapping("/api/connections/android/{id}/stop")
-    public Map<String, Object> stopAndroidVM(@PathVariable Integer id) {
-        return service.stopAndroidVM(id);
-    }
-
-    @PostMapping("/api/connections/android/health")
-    public Map<String, Object> refreshAndroidHealth() {
-        return Map.of("checked", service.refreshAndroidHealth());
-    }
-
-    @PostMapping("/api/connections/android/{id}/health")
-    public Map<String, Object> refreshAndroidHealth(@PathVariable Integer id) {
-        return service.refreshAndroidHealth(id);
+    public Map<String, Object> stopAndroid(@PathVariable Integer id) {
+        return service.stopAndroid(id);
     }
 
     @DeleteMapping("/api/connections/android/{id}")
-    public ResponseEntity<Void> deleteAndroidVM(@PathVariable Integer id) {
-        service.deleteAndroidVM(id);
+    public ResponseEntity<Void> deleteAndroid(@PathVariable Integer id) {
+        service.deleteAndroid(id);
         return ResponseEntity.noContent().build();
     }
-}
 
-@RestController
-@RequiredArgsConstructor
-class ConnectionsResource {
-
-    private final ConnectionManagerService service;
-
-    @PostMapping("/api/connections/health")
-    public Map<String, Object> refreshAllHealth() {
-        return service.refreshConnectionHealth();
+    @PostMapping("/api/connections/android/health")
+    public List<Map<String, Object>> checkHealth(@RequestBody HealthCheckRequest request) {
+        return service.checkHealth(request.getIds());
     }
 }

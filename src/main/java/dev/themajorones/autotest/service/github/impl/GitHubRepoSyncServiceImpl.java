@@ -17,6 +17,7 @@ import dev.themajorones.models.entity.GitHubOwner;
 import dev.themajorones.models.entity.GitHubOwnerType;
 import dev.themajorones.models.entity.GitHubRepo;
 import dev.themajorones.models.entity.GitHubUser;
+import dev.themajorones.models.util.ValidationUtils;
 
 @Service
 public class GitHubRepoSyncServiceImpl implements GitHubRepoSyncService {
@@ -55,9 +56,9 @@ public class GitHubRepoSyncServiceImpl implements GitHubRepoSyncService {
     }
 
     private GitHubRepo syncRepository(GitHubRepoResponse response, long syncedAt) {
-        Long githubId = requireId(response.getId(), "GitHub repository id");
-        String name = requireText(response.getName(), "GitHub repository name");
-        String fullName = requireText(response.getFullName(), "GitHub repository full name");
+        Long githubId = ValidationUtils.requireId(response.getId(), "GitHub repository id");
+        String name = ValidationUtils.requireText(response.getName(), "GitHub repository name");
+        String fullName = ValidationUtils.requireText(response.getFullName(), "GitHub repository full name");
         GitHubOwner owner = upsertOwner(response.getOwner(), syncedAt);
 
         GitHubRepo repo = gitHubRepoRepository.findByGithubId(githubId)
@@ -76,8 +77,8 @@ public class GitHubRepoSyncServiceImpl implements GitHubRepoSyncService {
         if (response == null) {
             throw new IllegalStateException("GitHub repository owner is required");
         }
-        Long githubId = requireId(response.getId(), "GitHub owner id");
-        String login = requireText(response.getLogin(), "GitHub owner login");
+        Long githubId = ValidationUtils.requireId(response.getId(), "GitHub owner id");
+        String login = ValidationUtils.requireText(response.getLogin(), "GitHub owner login");
         String displayName = response.getName() == null || response.getName().isBlank() ? login : response.getName().trim();
         GitHubOwnerType type = "Organization".equalsIgnoreCase(response.getType()) ? GitHubOwnerType.ORG : GitHubOwnerType.USER;
 
@@ -93,17 +94,4 @@ public class GitHubRepoSyncServiceImpl implements GitHubRepoSyncService {
             .setSyncedAt(syncedAt));
     }
 
-    private Long requireId(Long value, String description) {
-        if (value == null) {
-            throw new IllegalStateException(description + " is required");
-        }
-        return value;
-    }
-
-    private String requireText(String value, String description) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException(description + " is required");
-        }
-        return value.trim();
-    }
 }

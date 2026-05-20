@@ -1,6 +1,5 @@
 package dev.themajorones.autotest.repository;
 
-import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,5 +12,4 @@ public interface OllamaRepository extends JpaRepository<Ollama, Integer> {
 
     Optional<Ollama> findByBaseUrl(String baseUrl);
 
-    List<Ollama> findAllByEnabledTrue();
 }

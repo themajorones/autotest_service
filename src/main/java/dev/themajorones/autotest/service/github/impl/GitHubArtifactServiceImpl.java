@@ -22,6 +22,7 @@ import dev.themajorones.models.entity.GitHubArtifact;
 import dev.themajorones.models.entity.GitHubRepo;
 import dev.themajorones.models.entity.GitHubUser;
 import dev.themajorones.models.entity.GitHubWorkflowRun;
+import dev.themajorones.models.util.ValidationUtils;
 
 @Service
 public class GitHubArtifactServiceImpl implements GitHubArtifactService {
@@ -74,7 +75,7 @@ public class GitHubArtifactServiceImpl implements GitHubArtifactService {
         if (user == null || artifact == null) {
             throw new IllegalArgumentException("User and artifact are required");
         }
-        String accessToken = requireText(user.getAccessToken(), "GitHub access token");
+        String accessToken = ValidationUtils.requireText(user.getAccessToken(), "GitHub access token");
         GitHubRepo repo = artifact.getRepo();
         if (repo == null || repo.getOwner() == null) {
             throw new IllegalArgumentException("Artifact repository and owner are required");
@@ -82,9 +83,9 @@ public class GitHubArtifactServiceImpl implements GitHubArtifactService {
 
         return gitHubApiClient.downloadArtifact(
             accessToken,
-            requireText(repo.getOwner().getLogin(), "GitHub owner login"),
-            requireText(repo.getName(), "GitHub repository name"),
-            requireId(artifact.getGithubArtifactId(), "GitHub artifact id")
+            ValidationUtils.requireText(repo.getOwner().getLogin(), "GitHub owner login"),
+            ValidationUtils.requireText(repo.getName(), "GitHub repository name"),
+            ValidationUtils.requireId(artifact.getGithubArtifactId(), "GitHub artifact id")
         );
     }
 
@@ -114,10 +115,10 @@ public class GitHubArtifactServiceImpl implements GitHubArtifactService {
     }
 
     private GitHubWorkflowRun upsertRun(GitHubRepo repo, GitHubWorkflowRunResponse response, long syncedAt) {
-        Long githubRunId = requireId(response.getId(), "GitHub workflow run id");
-        Long workflowId = requireId(response.getWorkflowId(), "GitHub workflow id");
-        String headSha = requireText(response.getHeadSha(), "GitHub workflow head SHA");
-        String status = requireText(response.getStatus(), "GitHub workflow status");
+        Long githubRunId = ValidationUtils.requireId(response.getId(), "GitHub workflow run id");
+        Long workflowId = ValidationUtils.requireId(response.getWorkflowId(), "GitHub workflow id");
+        String headSha = ValidationUtils.requireText(response.getHeadSha(), "GitHub workflow head SHA");
+        String status = ValidationUtils.requireText(response.getStatus(), "GitHub workflow status");
 
         GitHubWorkflowRun run = gitHubWorkflowRunRepository.findByGithubRunId(githubRunId)
             .orElseGet(GitHubWorkflowRun::new);
@@ -132,9 +133,9 @@ public class GitHubArtifactServiceImpl implements GitHubArtifactService {
     }
 
     private GitHubArtifact upsertArtifact(GitHubRepo repo, GitHubWorkflowRun run, GitHubArtifactResponse response) {
-        Long githubArtifactId = requireId(response.getId(), "GitHub artifact id");
-        String name = requireText(response.getName(), "GitHub artifact name");
-        Long sizeInBytes = requireId(response.getSizeInBytes(), "GitHub artifact size");
+        Long githubArtifactId = ValidationUtils.requireId(response.getId(), "GitHub artifact id");
+        String name = ValidationUtils.requireText(response.getName(), "GitHub artifact name");
+        Long sizeInBytes = ValidationUtils.requireId(response.getSizeInBytes(), "GitHub artifact size");
         Long expiresAt = response.getExpiresAt() == null ? null : response.getExpiresAt().getEpochSecond();
         if (expiresAt == null) {
             throw new IllegalStateException("GitHub artifact expiration timestamp is required");
@@ -209,17 +210,4 @@ public class GitHubArtifactServiceImpl implements GitHubArtifactService {
         }
     }
 
-    private Long requireId(Long value, String description) {
-        if (value == null) {
-            throw new IllegalStateException(description + " is required");
-        }
-        return value;
-    }
-
-    private String requireText(String value, String description) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException(description + " is required");
-        }
-        return value.trim();
-    }
 }
