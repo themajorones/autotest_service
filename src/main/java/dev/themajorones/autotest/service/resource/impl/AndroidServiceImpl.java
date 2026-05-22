@@ -22,6 +22,7 @@ import dev.themajorones.models.dto.AndroidDetail;
 import dev.themajorones.models.dto.CreateAndroidRequest;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
 import dev.themajorones.models.entity.Android;
+import dev.themajorones.models.entity.AndroidDetails;
 import dev.themajorones.models.entity.Docker;
 import dev.themajorones.models.entity.TaskLog;
 import dev.themajorones.models.mapper.AndroidMapper;
@@ -61,10 +62,16 @@ public class AndroidServiceImpl implements AndroidService {
     public Map<String, Object> updateAndroid(Integer id, CreateAndroidRequest request) {
         Android android = androidRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Android not found"));
         CreateAndroidRequest normalized = normalizeAndroidRequest(request);
+        if (android.getDetails() == null) {
+            android.setDetails(new AndroidDetails());
+        }
+
         android.setDocker(dockerService.getDocker(requireId(normalized.getDockerId(), "Docker connection id")))
+                .setType(normalized.getType())
                 .setName(requireText(normalized.getName(), "Android name"))
                 .setImage(normalized.getImage())
                 .getDetails().setAccelerationMode(normalized.getAccelerationMode());
+
         if (normalized.getWidth() != null) {
             android.getDetails().setWidth(normalized.getWidth());
         }

@@ -83,6 +83,11 @@ type HealthCheckRequest = {
   ids: number[];
 };
 
+type AndroidCreateResponse = {
+  androidId: number;
+  taskLogId: number;
+};
+
 export function App() {
   const [tab, setTab] = useState<Tab>('ollama');
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
@@ -221,6 +226,7 @@ export function App() {
     const rows = await getJson<Android[]>('/api/connections/android');
     androidRef.current = rows;
     setAndroid(rows);
+    return rows;
   }
 
   async function loadLogs() {
@@ -307,20 +313,40 @@ export function App() {
     const payload = {
       ...androidForm,
       dockerId,
+      type: 'REDROID',
       width,
       height,
       dpi,
     };
     if (editingAndroidId == null) {
-      await sendJson('/api/connections/android', 'POST', payload);
+      const created = await sendJson<AndroidCreateResponse>('/api/connections/android', 'POST', payload);
       setStatus('Android creation queued');
+      resetAndroidForm();
+      await loadAndroid();
+      await loadLogs();
+      void pollAndroidAddress(created.androidId);
     } else {
       await sendJson(`/api/connections/android/${editingAndroidId}`, 'PUT', payload);
+      resetAndroidForm();
+      await loadAndroid();
+      await loadLogs();
       setStatus('Android saved');
     }
-    resetAndroidForm();
-    await loadAndroid();
-    await loadLogs();
+  }
+
+  async function pollAndroidAddress(androidId: number) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(3_000);
+      const rows = await loadAndroid();
+      const row = rows.find((item) => item.id === androidId);
+      if (!row) {
+        return;
+      }
+      if (row.adbHost && row.adbPort != null) {
+        setStatus(`Android ready at ${row.adbHost}:${row.adbPort}`);
+        return;
+      }
+    }
   }
 
   function editOllama(row: Ollama) {
@@ -832,6 +858,12 @@ function parseOptionalInteger(value: string) {
   }
   const parsed = Number(value);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function delay(timeoutMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, timeoutMs);
+  });
 }
 
 function message(error: unknown) {
