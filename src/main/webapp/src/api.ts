@@ -36,5 +36,16 @@ async function assertOk(response: Response): Promise<void> {
     return;
   }
   const text = await response.text();
-  throw new Error(text || `${response.status} ${response.statusText}`);
+  if (text) {
+    try {
+      const parsed = JSON.parse(text) as { message?: string; code?: string };
+      throw new Error(parsed.message || parsed.code || text);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(text);
+      }
+      throw error;
+    }
+  }
+  throw new Error(`${response.status} ${response.statusText}`);
 }

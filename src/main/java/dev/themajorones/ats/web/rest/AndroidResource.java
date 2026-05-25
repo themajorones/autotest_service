@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import dev.themajorones.ats.dto.connection.HealthCheckRequest;
 import dev.themajorones.ats.service.resource.AndroidService;
+import dev.themajorones.models.constants.AndroidType;
 import dev.themajorones.models.dto.AndroidDetail;
 import dev.themajorones.models.dto.CreateAndroidRequest;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +32,16 @@ public class AndroidResource {
 
     @PostMapping("/api/connections/android")
     public ResponseEntity<Map<String, Object>> createAndroid(@RequestBody CreateAndroidRequest request) {
-        return ResponseEntity.accepted().body(service.createAndroid(request));
+        Map<String, Object> body = service.createAndroid(request);
+        if (AndroidType.DIRECT.name().equalsIgnoreCase(request.getType())) {
+            return ResponseEntity.ok(body);
+        }
+        return ResponseEntity.accepted().body(body);
+    }
+
+    @PostMapping("/api/connections/android/direct/pair")
+    public Map<String, Object> pairDirectAndroid(@RequestBody CreateAndroidRequest request) {
+        return service.pairDirectAndroid(request);
     }
 
     @PutMapping("/api/connections/android/{id}")
@@ -42,6 +52,11 @@ public class AndroidResource {
     @GetMapping("/api/connections/android/{id}")
     public AndroidDetail getAndroid(@PathVariable Integer id) {
         return service.getAndroid(id);
+    }
+
+    @PostMapping("/api/connections/android/{id}/start")
+    public Map<String, Object> startAndroid(@PathVariable Integer id) {
+        return service.startAndroid(id);
     }
 
     @PostMapping("/api/connections/android/{id}/stop")

@@ -16,6 +16,10 @@ public interface AndroidService {
 
     Map<String, Object> createAndroid(CreateAndroidRequest request);
 
+    Map<String, Object> pairDirectAndroid(CreateAndroidRequest request);
+
+    Map<String, Object> startAndroid(Integer id);
+
     Map<String, Object> stopAndroid(Integer id);
 
     void deleteAndroid(Integer id);

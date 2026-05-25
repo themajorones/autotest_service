@@ -29,9 +29,9 @@ type Docker = {
 
 type Android = {
   id: number;
-  type: string;
-  dockerId: number;
-  dockerName: string;
+  type: 'REDROID' | 'DIRECT' | string;
+  dockerId?: number | null;
+  dockerName?: string | null;
   name: string;
   image: string;
   containerId?: string;
@@ -85,7 +85,8 @@ type HealthCheckRequest = {
 
 type AndroidCreateResponse = {
   androidId: number;
-  taskLogId: number;
+  taskLogId?: number;
+  status?: string;
 };
 
 export function App() {
@@ -129,13 +130,18 @@ export function App() {
     enabled: true,
   });
   const [androidForm, setAndroidForm] = useState({
+    type: 'REDROID',
     dockerId: '',
-    name: 'redroid-1',
-    image: 'redroid/redroid:15.0.0_64only-latest',
-    accelerationMode: 'GUEST',
-    width: '720',
-    height: '1280',
-    dpi: '320',
+    name: '',
+    image: '',
+    accelerationMode: '',
+    width: '',
+    height: '',
+    dpi: '',
+    adbHost: '',
+    adbPort: '',
+    pairPort: '',
+    pairCode: '',
   });
 
   useEffect(() => {
@@ -301,10 +307,19 @@ export function App() {
 
   async function submitAndroid(event: FormEvent) {
     event.preventDefault();
+    if (androidForm.type === 'DIRECT') {
+      await submitDirectAndroid();
+      return;
+    }
+
     const selectedDockerId = androidForm.dockerId || docker[0]?.id;
     const dockerId = Number(selectedDockerId);
     if (!selectedDockerId || Number.isNaN(dockerId)) {
       setStatus('Please select a Docker connection before saving the Android');
+      return;
+    }
+    if (!androidForm.image.trim() || !androidForm.accelerationMode.trim()) {
+      setStatus('Image and acceleration are required for Redroid');
       return;
     }
     const width = parseOptionalInteger(androidForm.width);
@@ -332,6 +347,35 @@ export function App() {
       await loadLogs();
       setStatus('Android saved');
     }
+  }
+
+  async function submitDirectAndroid() {
+    const pairCode = androidForm.pairCode.trim();
+    const pairPort = parseOptionalInteger(androidForm.pairPort);
+    if ((pairCode && pairPort == null) || (!pairCode && pairPort != null)) {
+      setStatus('Pair port and pair code must be provided together');
+      return;
+    }
+
+    const adbPort = parseOptionalInteger(androidForm.adbPort);
+    if (!androidForm.adbHost.trim() || adbPort == null) {
+      setStatus('ADB host and connect port are required');
+      return;
+    }
+    const payload = {
+      type: 'DIRECT',
+      name: androidForm.name || androidForm.adbHost.trim(),
+      adbHost: androidForm.adbHost.trim(),
+      adbPort,
+      pairPort,
+      pairCode: pairCode || undefined,
+    };
+    const path = editingAndroidId == null ? '/api/connections/android' : `/api/connections/android/${editingAndroidId}`;
+    const method = editingAndroidId == null ? 'POST' : 'PUT';
+    const saved = await sendJson<AndroidCreateResponse | Android>(path, method, payload);
+    resetAndroidForm();
+    await loadAndroid();
+    setStatus(`Direct Android connected${'androidId' in saved ? ` (#${saved.androidId})` : ''}`);
   }
 
   async function pollAndroidAddress(androidId: number) {
@@ -374,15 +418,33 @@ export function App() {
   function editAndroid(row: Android) {
     setEditingAndroidId(row.id);
     setAndroidForm({
-      dockerId: String(row.dockerId),
+      type: row.type === 'DIRECT' ? 'DIRECT' : 'REDROID',
+      dockerId: row.dockerId == null ? '' : String(row.dockerId),
       name: row.name,
       image: row.image,
-      accelerationMode: row.accelerationMode,
+      accelerationMode: row.accelerationMode || '',
       width: row.width == null ? '' : String(row.width),
       height: row.height == null ? '' : String(row.height),
       dpi: row.dpi == null ? '' : String(row.dpi),
+      adbHost: row.adbHost || '',
+      adbPort: row.adbPort == null ? '' : String(row.adbPort),
+      pairPort: '',
+      pairCode: '',
     });
     setStatus('Editing Android');
+  }
+
+  async function startAndroid(id: number) {
+    const started = await sendJson<Android>(`/api/connections/android/${id}/start`, 'POST');
+    await loadAndroid();
+    setHealthStatuses((current) => ({
+      ...current,
+      android: {
+        ...current.android,
+        [id]: started.status || 'RUNNING',
+      },
+    }));
+    setStatus('Android started');
   }
 
   async function stopAndroid(id: number) {
@@ -428,16 +490,22 @@ export function App() {
   function resetAndroidForm() {
     setEditingAndroidId(null);
     setAndroidForm({
+      type: 'REDROID',
       dockerId: '',
-      name: 'redroid-1',
-      image: 'redroid/redroid:15.0.0_64only-latest',
-      accelerationMode: 'GUEST',
-      width: '720',
-      height: '1280',
-      dpi: '320',
+      name: '',
+      image: '',
+      accelerationMode: '',
+      width: '',
+      height: '',
+      dpi: '',
+      adbHost: '',
+      adbPort: '',
+      pairPort: '',
+      pairCode: '',
     });
   }
 
+  const isDirectAndroidForm = androidForm.type === 'DIRECT';
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -569,65 +637,125 @@ export function App() {
           <form className="form-grid" onSubmit={(event) => submitAndroid(event).catch((error) => setStatus(message(error)))}>
             <label>
               Type
-              <select value="REDROID" disabled>
+              <select
+                value={androidForm.type}
+                onChange={(event) => {
+                  const type = event.target.value;
+                  setAndroidForm({
+                    ...androidForm,
+                    type,
+                    name: '',
+                    image: '',
+                    accelerationMode: '',
+                    width: '',
+                    height: '',
+                    dpi: '',
+                    pairCode: '',
+                  });
+                }}
+              >
                 <option value="REDROID">Redroid</option>
-              </select>
-            </label>
-            <label>
-              Docker
-              <select value={androidForm.dockerId || docker[0]?.id || ''} onChange={(event) => setAndroidForm({ ...androidForm, dockerId: event.target.value })}>
-                {docker.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
+                <option value="DIRECT">Direct ADB</option>
               </select>
             </label>
             <label>
               Name
               <input value={androidForm.name} onChange={(event) => setAndroidForm({ ...androidForm, name: event.target.value })} />
             </label>
-            <label>
-              Image
-              <input value={androidForm.image} onChange={(event) => setAndroidForm({ ...androidForm, image: event.target.value })} />
-            </label>
-            <label>
-              Acceleration
-              <select value={androidForm.accelerationMode} onChange={(event) => setAndroidForm({ ...androidForm, accelerationMode: event.target.value })}>
-                <option value="GUEST">GUEST</option>
-                <option value="HOST">HOST</option>
-                <option value="AUTO">AUTO</option>
-              </select>
-            </label>
-            <fieldset className="field-group span-all">
-              <legend>Redroid options</legend>
-              <div className="form-grid compact-grid">
+            {!isDirectAndroidForm && (
+              <>
                 <label>
-                  Width
+                  Docker
+                  <select value={androidForm.dockerId || docker[0]?.id || ''} onChange={(event) => setAndroidForm({ ...androidForm, dockerId: event.target.value })}>
+                    {docker.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Image
+                  <input value={androidForm.image} onChange={(event) => setAndroidForm({ ...androidForm, image: event.target.value })} />
+                </label>
+                <label>
+                  Acceleration
+                  <select value={androidForm.accelerationMode} onChange={(event) => setAndroidForm({ ...androidForm, accelerationMode: event.target.value })}>
+                    <option value="">Select acceleration</option>
+                    <option value="GUEST">GUEST</option>
+                    <option value="HOST">HOST</option>
+                    <option value="AUTO">AUTO</option>
+                  </select>
+                </label>
+                <fieldset className="field-group span-all">
+                  <legend>Redroid options</legend>
+                  <div className="form-grid compact-grid">
+                    <label>
+                      Width
+                      <input
+                        inputMode="numeric"
+                        value={androidForm.width}
+                        onChange={(event) => setAndroidForm({ ...androidForm, width: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Height
+                      <input
+                        inputMode="numeric"
+                        value={androidForm.height}
+                        onChange={(event) => setAndroidForm({ ...androidForm, height: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      DPI
+                      <input
+                        inputMode="numeric"
+                        value={androidForm.dpi}
+                        onChange={(event) => setAndroidForm({ ...androidForm, dpi: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                </fieldset>
+              </>
+            )}
+            {isDirectAndroidForm && (
+              <>
+                <label>
+                  Host
                   <input
-                    inputMode="numeric"
-                    value={androidForm.width}
-                    onChange={(event) => setAndroidForm({ ...androidForm, width: event.target.value })}
+                    value={androidForm.adbHost}
+                    onChange={(event) => setAndroidForm({ ...androidForm, adbHost: event.target.value })}
                   />
                 </label>
                 <label>
-                  Height
+                  Connect Port
                   <input
                     inputMode="numeric"
-                    value={androidForm.height}
-                    onChange={(event) => setAndroidForm({ ...androidForm, height: event.target.value })}
+                    value={androidForm.adbPort}
+                    onChange={(event) => setAndroidForm({ ...androidForm, adbPort: event.target.value })}
                   />
                 </label>
                 <label>
-                  DPI
+                  Pair Port (Optional)
                   <input
                     inputMode="numeric"
-                    value={androidForm.dpi}
-                    onChange={(event) => setAndroidForm({ ...androidForm, dpi: event.target.value })}
+                    value={androidForm.pairPort}
+                    onChange={(event) => setAndroidForm({ ...androidForm, pairPort: event.target.value })}
                   />
                 </label>
-              </div>
-            </fieldset>
+                <label>
+                  Pair Code (Optional)
+                  <input
+                    value={androidForm.pairCode}
+                    onChange={(event) => {
+                      setAndroidForm({ ...androidForm, pairCode: event.target.value });
+                    }}
+                  />
+                </label>
+              </>
+            )}
             <div className="button-row form-actions">
-              <button type="submit">{editingAndroidId == null ? 'Create Android' : 'Update Android'}</button>
+              <button type="submit">
+                {editingAndroidId == null ? 'Create Android' : 'Update Android'}
+              </button>
               {editingAndroidId != null && <button type="button" onClick={resetAndroidForm}>Cancel</button>}
             </div>
           </form>
@@ -642,8 +770,33 @@ export function App() {
             }}
             onDetail={(row) => loadAndroidDetail(row.id).catch((error) => setStatus(message(error)))}
             onEdit={editAndroid}
-            onStop={(row) => stopAndroid(row.id).catch((error) => setStatus(message(error)))}
             onDelete={(row) => deleteAndroid(row.id).catch((error) => setStatus(message(error)))}
+            renderActions={(row) => {
+              const typedRow = row as Android;
+              const status = healthStatuses.android[typedRow.id];
+              const lifecycleAction = redroidLifecycleAction(typedRow, status);
+              return (
+                <>
+                  <button type="button" onClick={() => loadAndroidDetail(typedRow.id).catch((error) => setStatus(message(error)))}>
+                    Detail
+                  </button>
+                  <button type="button" onClick={() => editAndroid(typedRow)}>Edit</button>
+                  {lifecycleAction === 'START' && (
+                    <button type="button" onClick={() => startAndroid(typedRow.id).catch((error) => setStatus(message(error)))}>
+                      Start
+                    </button>
+                  )}
+                  {lifecycleAction === 'STOP' && (
+                    <button type="button" onClick={() => stopAndroid(typedRow.id).catch((error) => setStatus(message(error)))}>
+                      Stop
+                    </button>
+                  )}
+                  <button type="button" onClick={() => deleteAndroid(typedRow.id).catch((error) => setStatus(message(error)))}>
+                    Delete
+                  </button>
+                </>
+              );
+            }}
             renderCell={(row, column) => {
               if (column === 'adbHost') {
                 const address = formatAndroidAddress(row as Android);
@@ -670,7 +823,7 @@ export function App() {
                 </div>
                 <div>
                   <span>Docker</span>
-                  <strong>{selectedAndroidDetail.android.dockerName}</strong>
+                  <strong>{selectedAndroidDetail.android.type === 'DIRECT' ? '-' : selectedAndroidDetail.android.dockerName}</strong>
                 </div>
                 <div>
                   <span>Image</span>
@@ -703,7 +856,7 @@ export function App() {
                 </div>
                 <div>
                   <span>Acceleration</span>
-                  <strong>{selectedAndroidDetail.android.accelerationMode}</strong>
+                  <strong>{selectedAndroidDetail.android.type === 'DIRECT' ? '-' : selectedAndroidDetail.android.accelerationMode}</strong>
                 </div>
                 <div>
                   <span>Resolution</span>
@@ -711,7 +864,7 @@ export function App() {
                 </div>
                 <div>
                   <span>Container</span>
-                  <strong>{selectedAndroidDetail.android.containerName || selectedAndroidDetail.android.containerId || '-'}</strong>
+                  <strong>{selectedAndroidDetail.android.type === 'DIRECT' ? '-' : selectedAndroidDetail.android.containerName || selectedAndroidDetail.android.containerId || '-'}</strong>
                 </div>
               </div>
               {selectedAndroidDetail.dockerInspectJson && <pre className="detail">{selectedAndroidDetail.dockerInspectJson}</pre>}
@@ -752,11 +905,13 @@ function DataTable<T extends { id: number }>({
   onDetail,
   onEdit,
   onStop,
+  renderActions,
 }: {
   rows: T[];
   columns: string[];
   columnLabels?: Record<string, string>;
   renderCell?: (row: T, column: string) => ReactNode;
+  renderActions?: (row: T) => ReactNode;
   onDelete?: (row: T) => void;
   onDetail?: (row: T) => void;
   onEdit?: (row: T) => void;
@@ -768,7 +923,7 @@ function DataTable<T extends { id: number }>({
         <thead>
           <tr>
             {columns.map((column) => <th key={column}>{columnLabels?.[column] ?? column}</th>)}
-            {(onDelete || onDetail || onEdit || onStop) && <th>actions</th>}
+            {(renderActions || onDelete || onDetail || onEdit || onStop) && <th>actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -783,13 +938,17 @@ function DataTable<T extends { id: number }>({
                 const rendered = renderCell?.(row, column);
                 return <td key={column}>{rendered === undefined ? cellValue(row, column) : rendered}</td>;
               })}
-              {(onDelete || onDetail || onEdit || onStop) && (
+              {(renderActions || onDelete || onDetail || onEdit || onStop) && (
                 <td>
                   <div className="table-actions">
-                    {onDetail && <button type="button" onClick={() => onDetail(row)}>Detail</button>}
-                    {onEdit && <button type="button" onClick={() => onEdit(row)}>Edit</button>}
-                    {onStop && <button type="button" onClick={() => onStop(row)}>Stop</button>}
-                    {onDelete && <button type="button" onClick={() => onDelete(row)}>Delete</button>}
+                    {renderActions ? renderActions(row) : (
+                      <>
+                        {onDetail && <button type="button" onClick={() => onDetail(row)}>Detail</button>}
+                        {onEdit && <button type="button" onClick={() => onEdit(row)}>Edit</button>}
+                        {onStop && <button type="button" onClick={() => onStop(row)}>Stop</button>}
+                        {onDelete && <button type="button" onClick={() => onDelete(row)}>Delete</button>}
+                      </>
+                    )}
                   </div>
                 </td>
               )}
@@ -846,6 +1005,19 @@ function formatJsonList(value?: string) {
     return value;
   }
   return '-';
+}
+
+function redroidLifecycleAction(android: Android, status?: string) {
+  if (android.type !== 'REDROID') {
+    return null;
+  }
+  if (status === 'STOPPED') {
+    return 'START';
+  }
+  if (status === 'RUNNING' || status === 'CANT_REACH' || status === 'UNHEALTHY') {
+    return 'STOP';
+  }
+  return null;
 }
 
 function label(tab: Tab) {
