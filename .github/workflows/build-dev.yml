@@ -66,7 +66,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: autotest-build-artifacts-dev
+          name: ats-build-artifacts-dev
           path: target/*.war
           compression-level: 0
           retention-days: 30
@@ -92,7 +92,7 @@ jobs:
       - name: Download WAR artifact
         uses: actions/download-artifact@v4
         with:
-          name: autotest-build-artifacts-dev
+          name: ats-build-artifacts-dev
           path: ./artifact
 
       - name: Resolve WAR artifact

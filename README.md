@@ -1,4 +1,4 @@
-# Android Test Service
+# Auto Test Service
 
 ### Prerequisites
 

@@ -442,7 +442,7 @@ export function App() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Autotest service</p>
+          <p className="eyebrow">Auto test service</p>
           <h1>Connection manager</h1>
         </div>
         <div className="button-row">

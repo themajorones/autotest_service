@@ -10,10 +10,10 @@
 		<!-- lookup parent from repository -->
 	</parent>
 	<groupId>dev.themajorones</groupId>
-	<artifactId>autotest</artifactId>
+	<artifactId>ats</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<packaging>war</packaging>
-	<name>autotest</name>
+	<name>ats</name>
 	<description/>
 	<url/>
 	<licenses>

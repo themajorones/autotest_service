@@ -8,7 +8,7 @@ COPY .devcontainer/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Copy repository into the container
-WORKDIR /workspaces/autotest_service
+WORKDIR /workspaces/ats_service
 COPY . .
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

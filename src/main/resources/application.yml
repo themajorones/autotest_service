@@ -1,12 +1,12 @@
 spring:
   application:
-    name: autotest
+    name: ats
   profiles:
     default: dev
   config:
     import:
       - optional:file:.env[.properties]
-      - optional:file:android_test_service/.env[.properties]
+      - optional:file:ats/.env[.properties]
   jpa:
     hibernate:
       ddl-auto: update

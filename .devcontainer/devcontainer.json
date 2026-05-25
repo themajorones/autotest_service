@@ -7,7 +7,7 @@
   "runArgs": [
     "--network=host"
   ],
-  "workspaceFolder": "/workspaces/autotest_service",
+  "workspaceFolder": "/workspaces/ats_service",
   "customizations": {
     "vscode": {
       "settings": {
