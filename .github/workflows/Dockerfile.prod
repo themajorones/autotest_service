@@ -9,6 +9,7 @@ RUN set -eux; \
       nodejs \
       curl \
       unzip \
+      android-tools \
       findutils; \
     dnf clean all; \
     rm -rf /var/cache/dnf
