@@ -175,6 +175,10 @@ export function App() {
       return;
     }
     const timer = window.setInterval(() => {
+      if (tab === 'logs') {
+        loadLogs().catch((error) => setStatus(message(error)));
+        return;
+      }
       refreshTabHealth(tab)
         .catch((error) => setStatus(message(error)));
     }, 10_000);
@@ -246,6 +250,21 @@ export function App() {
 
   async function loadLogs() {
     setLogs(await getJson<TaskLog[]>('/api/task-logs'));
+  }
+
+  async function retryTaskLog(id: number) {
+    const taskLog = await sendJson<TaskLog>(`/api/task-logs/${id}/retry`, 'POST');
+    await loadLogs();
+    setStatus(`Retry queued for task log #${taskLog.id}`);
+  }
+
+  async function clearTaskLogs() {
+    if (!window.confirm('Clear all task logs from the database?')) {
+      return;
+    }
+    await deleteResource('/api/task-logs');
+    await loadLogs();
+    setStatus('Task logs cleared');
   }
 
   function markHealthChecked(nextTab: HealthTab, checks: HealthResponse[]) {
@@ -884,6 +903,14 @@ export function App() {
 
       {tab === 'logs' && (
         <section className="panel">
+          <div className="button-row">
+            <button type="button" onClick={() => loadLogs().catch((error) => setStatus(message(error)))}>
+              Refresh logs
+            </button>
+            <button type="button" onClick={() => clearTaskLogs().catch((error) => setStatus(message(error)))}>
+              Clear all logs
+            </button>
+          </div>
           <DataTable
             rows={logs}
             columns={['id', 'type', 'status', 'startedAt', 'endedAt', 'content', 'result']}
@@ -895,6 +922,21 @@ export function App() {
               endedAt: 'Ended',
               content: 'Message',
               result: 'Result',
+            }}
+            renderActions={(row) => {
+              const taskLog = row as TaskLog;
+              const retryable = taskLog.status !== 'PENDING' && taskLog.status !== 'RUNNING';
+              return (
+                <>
+                  <button
+                    type="button"
+                    disabled={!retryable}
+                    onClick={() => retryTaskLog(taskLog.id).catch((error) => setStatus(message(error)))}
+                  >
+                    Retry
+                  </button>
+                </>
+              );
             }}
           />
         </section>
