@@ -2,6 +2,7 @@ package dev.themajorones.ats.repository;
 
 import java.util.List;
 
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -13,6 +14,7 @@ import dev.themajorones.models.entity.GitHubOwnerMembership;
 @Repository
 public interface GitHubOwnerMembershipRepository extends JpaRepository<GitHubOwnerMembership, Integer> {
 
+    @EntityGraph(attributePaths = "owner")
     List<GitHubOwnerMembership> findAllByUserId(Integer userId);
 
     boolean existsByUserIdAndOwnerId(Integer userId, Integer ownerId);

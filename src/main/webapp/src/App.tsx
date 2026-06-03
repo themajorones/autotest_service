@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { deleteResource, getJson, sendJson } from './api';
+import { clearStoredAuthTokens, deleteResource, exchangeAuthCode, getJson, sendJson, setStoredAuthTokens } from './api';
 
 type Tab = 'ollama' | 'docker' | 'android' | 'logs';
 type HealthTab = Exclude<Tab, 'logs'>;
@@ -51,10 +51,11 @@ type AndroidDetail = {
 };
 
 type AuthInfo = {
+  userId?: number;
+  githubId?: number;
   login?: string;
-  name?: string;
-  avatarUrl?: string;
-  attributes?: Record<string, unknown>;
+  displayName?: string;
+  organizations?: string[];
 };
 
 type TaskLog = {
@@ -182,9 +183,17 @@ export function App() {
 
   async function bootstrap() {
     try {
+      const params = new URLSearchParams(window.location.search);
+      const authCode = params.get('authCode');
+      if (authCode) {
+        const tokens = await exchangeAuthCode(authCode);
+        setStoredAuthTokens(tokens);
+        window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
+      }
       const info = await getJson<AuthInfo>('/auth/info');
       setAuthInfo(info);
     } catch (error) {
+      clearStoredAuthTokens();
       window.location.href = '/oauth2/authorization/github';
     } finally {
       setAuthLoading(false);
@@ -515,9 +524,9 @@ export function App() {
         </div>
         <div className="button-row">
           {authLoading ? (
-            <span className="auth-chip">Checking session</span>
+            <span className="auth-chip">Checking login</span>
           ) : authInfo?.login ? (
-            <span className="auth-chip">Signed in as {authInfo.login}</span>
+            <span className="auth-chip">Signed in as {authInfo.displayName || authInfo.login}</span>
           ) : (
             <a className="button-link" href="/oauth2/authorization/github">Sign in</a>
           )}

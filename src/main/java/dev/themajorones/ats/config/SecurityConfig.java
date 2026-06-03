@@ -11,6 +11,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 import dev.themajorones.ats.security.CustomOAuth2FailureHandler;
+import dev.themajorones.ats.security.jwt.AppJwtAuthenticationConverter;
 
 @Configuration
 @EnableWebSecurity
@@ -20,16 +21,22 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(
         HttpSecurity http,
         CustomOAuth2SuccessHandler successHandler,
-        CustomOAuth2FailureHandler failureHandler
+        CustomOAuth2FailureHandler failureHandler,
+        AppJwtAuthenticationConverter appJwtAuthenticationConverter
     ) throws Exception {
 
         http.cors(cors -> cors.disable())
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(
+                    "/",
+                    "/index.html",
                     "/auth/**",
                     "/health",
                     "/assets/**",
+                    "/*.js",
+                    "/*.css",
+                    "/*.map",
                     "/oauth2/**",
                     "/login/**",
                     "/actuator/**"
@@ -46,6 +53,11 @@ public class SecurityConfig {
             .oauth2Login(oauth2 -> oauth2
                 .successHandler(successHandler)
                 .failureHandler(failureHandler)
+            )
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt
+                    .jwtAuthenticationConverter(appJwtAuthenticationConverter)
+                )
             );
 
         return http.build();
