@@ -258,15 +258,6 @@ export function App() {
     setStatus(`Retry queued for task log #${taskLog.id}`);
   }
 
-  async function clearTaskLogs() {
-    if (!window.confirm('Clear all task logs from the database?')) {
-      return;
-    }
-    await deleteResource('/api/task-logs');
-    await loadLogs();
-    setStatus('Task logs cleared');
-  }
-
   function markHealthChecked(nextTab: HealthTab, checks: HealthResponse[]) {
     const checkedAt = Date.now();
     const ids = checks.map((check) => check.id);
@@ -499,9 +490,9 @@ export function App() {
     setSelectedAndroidDetail(detail);
   }
 
-  async function copyText(value: string) {
+  async function copyText(value: string, label?: string) {
     await navigator.clipboard.writeText(value);
-    setStatus(`Copied ${value}`);
+    setStatus(`Copied ${label || 'value'}`);
   }
 
   function resetOllamaForm() {
@@ -829,7 +820,7 @@ export function App() {
               if (column === 'adbHost') {
                 const address = formatAndroidAddress(row as Android);
                 return address ? (
-                  <button type="button" className="text-button" onClick={() => copyText(address).catch((error) => setStatus(message(error)))}>
+                  <button type="button" className="text-button" onClick={() => copyText(address, 'address').catch((error) => setStatus(message(error)))}>
                     {address}
                   </button>
                 ) : (
@@ -874,7 +865,7 @@ export function App() {
                       onClick={() => {
                         const address = formatAndroidAddress(selectedAndroidDetail.android);
                         if (address) {
-                          void copyText(address);
+                          void copyText(address, 'address');
                         }
                       }}
                     >
@@ -907,9 +898,6 @@ export function App() {
             <button type="button" onClick={() => loadLogs().catch((error) => setStatus(message(error)))}>
               Refresh logs
             </button>
-            <button type="button" onClick={() => clearTaskLogs().catch((error) => setStatus(message(error)))}>
-              Clear all logs
-            </button>
           </div>
           <DataTable
             rows={logs}
@@ -937,6 +925,33 @@ export function App() {
                   </button>
                 </>
               );
+            }}
+            renderCell={(row, column) => {
+              if (column === 'status') {
+                const value = (row as TaskLog).status;
+                return <span className={`log-status ${taskStatusClass(value)}`}>{value}</span>;
+              }
+              if (column === 'content') {
+                const value = (row as TaskLog).content;
+                return value ? (
+                  <button type="button" className="text-button copy-cell ellipsis-cell" onClick={() => copyText(value, 'message').catch((error) => setStatus(message(error)))}>
+                    {value}
+                  </button>
+                ) : (
+                  '-'
+                );
+              }
+              if (column === 'result') {
+                const value = (row as TaskLog).result;
+                return value ? (
+                  <button type="button" className="text-button copy-cell ellipsis-cell" onClick={() => copyText(value, 'result').catch((error) => setStatus(message(error)))}>
+                    {value}
+                  </button>
+                ) : (
+                  '-'
+                );
+              }
+              return undefined;
             }}
           />
         </section>
@@ -1069,6 +1084,26 @@ function redroidLifecycleAction(android: Android, status?: string) {
     return 'STOP';
   }
   return null;
+}
+
+function taskStatusClass(status: string) {
+  const normalized = status.toLowerCase();
+  if (normalized.includes('pend')) {
+    return 'is-pending';
+  }
+  if (normalized.includes('run')) {
+    return 'is-running';
+  }
+  if (normalized.includes('fail') || normalized.includes('error')) {
+    return 'is-failed';
+  }
+  if (normalized.includes('success') || normalized.includes('done') || normalized.includes('complete')) {
+    return 'is-success';
+  }
+  if (normalized.includes('stop')) {
+    return 'is-stopped';
+  }
+  return 'is-neutral';
 }
 
 function label(tab: Tab) {

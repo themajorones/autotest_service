@@ -37,17 +37,80 @@ button,
 .text-button {
   background: transparent;
   border: 0;
-  color: #0b5cab;
+  color: inherit;
   cursor: pointer;
   display: inline;
   min-height: auto;
   padding: 0;
   text-align: left;
+  font: inherit;
 }
 
 .text-button:hover {
   background: transparent;
-  text-decoration: underline;
+  text-decoration: none;
+}
+
+.copy-cell {
+  display: block;
+  width: 100%;
+  color: inherit;
+}
+
+.ellipsis-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.log-status {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #172026;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1;
+  padding: 4px 10px;
+  text-transform: uppercase;
+}
+
+.log-status.is-pending {
+  background: #eef2f3;
+  border-color: #d8e0e4;
+  color: #51626d;
+}
+
+.log-status.is-running {
+  background: #e7f4ff;
+  border-color: #b8dcff;
+  color: #0b5cab;
+}
+
+.log-status.is-success {
+  background: #e7f7ec;
+  border-color: #b8e7c5;
+  color: #117a35;
+}
+
+.log-status.is-failed {
+  background: #fdecec;
+  border-color: #f1bbbb;
+  color: #b42318;
+}
+
+.log-status.is-stopped {
+  background: #f3eefb;
+  border-color: #dbcdf5;
+  color: #6941c6;
+}
+
+.log-status.is-neutral {
+  background: #f0f4f7;
+  border-color: #dbe3ea;
+  color: #384852;
 }
 
 button:hover,
