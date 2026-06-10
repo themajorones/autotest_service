@@ -50,6 +50,11 @@ type AndroidDetail = {
   dockerInspectJson?: string | null;
 };
 
+type RedroidImageOption = {
+  label: string;
+  value: string;
+};
+
 type AuthInfo = {
   userId?: number;
   githubId?: number;
@@ -91,6 +96,8 @@ type AndroidCreateResponse = {
   androidId?: number;
 };
 
+const REDROID_IMAGE_FALLBACK = 'redroid/redroid:16.0.0-latest';
+
 export function App() {
   const [tab, setTab] = useState<Tab>('ollama');
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
@@ -100,6 +107,7 @@ export function App() {
   const [android, setAndroid] = useState<Android[]>([]);
   const [logs, setLogs] = useState<TaskLog[]>([]);
   const [models, setModels] = useState<OllamaModel[]>([]);
+  const [redroidImages, setRedroidImages] = useState<RedroidImageOption[]>([]);
   const [lastHealthChecks, setLastHealthChecks] = useState<Record<HealthTab, Record<number, number>>>({
     ollama: {},
     docker: {},
@@ -135,7 +143,7 @@ export function App() {
     type: 'REDROID',
     dockerId: '',
     name: '',
-    image: '',
+    image: REDROID_IMAGE_FALLBACK,
     accelerationMode: '',
     width: '',
     height: '',
@@ -243,7 +251,11 @@ export function App() {
   }
 
   async function loadAndroid() {
-    const rows = await getJson<Android[]>('/api/connections/android');
+    const [rows, images] = await Promise.all([
+      getJson<Android[]>('/api/connections/android'),
+      getJson<RedroidImageOption[]>('/api/connections/redroid/images').catch(() => []),
+    ]);
+    setRedroidImages(images);
     androidRef.current = rows;
     setAndroid(rows);
     return rows;
@@ -290,6 +302,10 @@ export function App() {
       status: statuses[row.id],
       lastHealthCheckedAt: checks[row.id],
     }));
+  }
+
+  function defaultRedroidImage(options: RedroidImageOption[]) {
+    return options[0]?.value || REDROID_IMAGE_FALLBACK;
   }
 
   async function fetchOllamaModels() {
@@ -420,12 +436,15 @@ export function App() {
   }
 
   function editAndroid(row: Android) {
+    const nextImage = redroidImages.some((option) => option.value === row.image)
+      ? row.image
+      : defaultRedroidImage(redroidImages);
     setEditingAndroidId(row.id);
     setAndroidForm({
       type: row.type === 'DIRECT' ? 'DIRECT' : 'REDROID',
       dockerId: row.dockerId == null ? '' : String(row.dockerId),
       name: row.name,
-      image: row.image,
+      image: row.type === 'DIRECT' ? '' : nextImage,
       accelerationMode: row.accelerationMode || '',
       width: row.width == null ? '' : String(row.width),
       height: row.height == null ? '' : String(row.height),
@@ -497,7 +516,7 @@ export function App() {
       type: 'REDROID',
       dockerId: '',
       name: '',
-      image: '',
+      image: defaultRedroidImage(redroidImages),
       accelerationMode: '',
       width: '',
       height: '',
@@ -649,7 +668,7 @@ export function App() {
                     ...androidForm,
                     type,
                     name: '',
-                    image: '',
+                    image: type === 'REDROID' ? defaultRedroidImage(redroidImages) : '',
                     accelerationMode: '',
                     width: '',
                     height: '',
@@ -678,7 +697,20 @@ export function App() {
                 </label>
                 <label>
                   Image
-                  <input value={androidForm.image} onChange={(event) => setAndroidForm({ ...androidForm, image: event.target.value })} />
+                  <select
+                    value={androidForm.image}
+                    onChange={(event) => setAndroidForm({ ...androidForm, image: event.target.value })}
+                  >
+                    {redroidImages.length === 0 ? (
+                      <option value={REDROID_IMAGE_FALLBACK}>Android 16</option>
+                    ) : (
+                      redroidImages.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))
+                    )}
+                  </select>
                 </label>
                 <label>
                   Acceleration
@@ -886,13 +918,12 @@ export function App() {
           </div>
           <DataTable
             rows={logs}
-            columns={['id', 'type', 'status', 'startedAt', 'endedAt', 'content', 'result']}
+            columns={['id', 'type', 'status', 'duration', 'content', 'result']}
             columnLabels={{
               id: 'ID',
               type: 'Type',
               status: 'Status',
-              startedAt: 'Started',
-              endedAt: 'Ended',
+              duration: 'Duration',
               content: 'Message',
               result: 'Result',
             }}
@@ -915,6 +946,9 @@ export function App() {
               if (column === 'status') {
                 const value = (row as TaskLog).status;
                 return <span className={`log-status ${taskStatusClass(value)}`}>{value}</span>;
+              }
+              if (column === 'duration') {
+                return formatTaskLogDuration(row as TaskLog);
               }
               if (column === 'content') {
                 const value = (row as TaskLog).content;
@@ -1056,6 +1090,15 @@ function formatJsonList(value?: string) {
     return value;
   }
   return '-';
+}
+
+function formatTaskLogDuration(taskLog: Pick<TaskLog, 'startedAt' | 'endedAt'>) {
+  if (taskLog.startedAt == null) {
+    return '-';
+  }
+  const endedAt = taskLog.endedAt ?? Date.now();
+  const durationSeconds = Math.max(0, (endedAt - taskLog.startedAt) / 1000);
+  return `${durationSeconds.toFixed(1)}s`;
 }
 
 function redroidLifecycleAction(android: Android, status?: string) {

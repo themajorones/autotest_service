@@ -4,11 +4,14 @@ import java.util.List;
 import java.util.Map;
 
 import dev.themajorones.models.dto.AndroidDetail;
+import dev.themajorones.models.dto.RedroidImageOption;
 import dev.themajorones.models.dto.CreateAndroidRequest;
 
 public interface AndroidService {
 
     List<Map<String, Object>> listAndroid();
+
+    List<RedroidImageOption> listRedroidImages();
 
     Map<String, Object> updateAndroid(Integer id, CreateAndroidRequest request);
 

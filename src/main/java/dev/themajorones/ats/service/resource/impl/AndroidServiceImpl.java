@@ -20,10 +20,12 @@ import dev.themajorones.models.client.DockerClient;
 import dev.themajorones.models.constants.AndroidStatus;
 import dev.themajorones.models.constants.AndroidType;
 import dev.themajorones.models.constants.RabbitMqConstant;
+import dev.themajorones.models.constants.RedroidImageConstant;
 import dev.themajorones.models.constants.TaskLogConstant;
 import dev.themajorones.models.dto.AdbCommandResult;
 import dev.themajorones.models.dto.AndroidDetail;
 import dev.themajorones.models.dto.CreateAndroidRequest;
+import dev.themajorones.models.dto.RedroidImageOption;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
 import dev.themajorones.models.entity.Android;
 import dev.themajorones.models.entity.AndroidDetails;
@@ -57,6 +59,13 @@ public class AndroidServiceImpl implements AndroidService {
     public List<Map<String, Object>> listAndroid() {
         LOG.info("Listing Android connections");
         return androidRepository.findAllByOrderByIdDesc().stream().map(AndroidMapper::toFlatMap).toList();
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public List<RedroidImageOption> listRedroidImages() {
+        LOG.info("Listing Redroid image options");
+        return RedroidImageConstant.OPTIONS;
     }
 
     @Transactional

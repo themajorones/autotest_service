@@ -17,6 +17,7 @@ import dev.themajorones.ats.service.resource.AndroidService;
 import dev.themajorones.models.constants.AndroidType;
 import dev.themajorones.models.dto.AndroidDetail;
 import dev.themajorones.models.dto.CreateAndroidRequest;
+import dev.themajorones.models.dto.RedroidImageOption;
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -28,6 +29,11 @@ public class AndroidResource {
     @GetMapping("/api/connections/android")
     public List<Map<String, Object>> listAndroid() {
         return service.listAndroid();
+    }
+
+    @GetMapping("/api/connections/redroid/images")
+    public List<RedroidImageOption> listRedroidImages() {
+        return service.listRedroidImages();
     }
 
     @PostMapping("/api/connections/android")
