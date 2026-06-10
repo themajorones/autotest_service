@@ -85,9 +85,10 @@ type HealthCheckRequest = {
 };
 
 type AndroidCreateResponse = {
-  androidId: number;
   taskLogId?: number;
   status?: string;
+  message?: string;
+  androidId?: number;
 };
 
 export function App() {
@@ -354,11 +355,10 @@ export function App() {
     };
     if (editingAndroidId == null) {
       const created = await sendJson<AndroidCreateResponse>('/api/connections/android', 'POST', payload);
-      setStatus('Android creation queued');
+      setStatus(`Android creation queued${created.taskLogId ? ` (#${created.taskLogId})` : ''}`);
       resetAndroidForm();
       await loadAndroid();
       await loadLogs();
-      void pollAndroidAddress(created.androidId);
     } else {
       await sendJson(`/api/connections/android/${editingAndroidId}`, 'PUT', payload);
       resetAndroidForm();
@@ -395,21 +395,6 @@ export function App() {
     resetAndroidForm();
     await loadAndroid();
     setStatus(`Direct Android connected${'androidId' in saved ? ` (#${saved.androidId})` : ''}`);
-  }
-
-  async function pollAndroidAddress(androidId: number) {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await delay(3_000);
-      const rows = await loadAndroid();
-      const row = rows.find((item) => item.id === androidId);
-      if (!row) {
-        return;
-      }
-      if (row.adbHost && row.adbPort != null) {
-        setStatus(`Android ready at ${row.adbHost}:${row.adbPort}`);
-        return;
-      }
-    }
   }
 
   function editOllama(row: Ollama) {
@@ -1116,12 +1101,6 @@ function parseOptionalInteger(value: string) {
   }
   const parsed = Number(value);
   return Number.isNaN(parsed) ? undefined : parsed;
-}
-
-function delay(timeoutMs: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, timeoutMs);
-  });
 }
 
 function message(error: unknown) {

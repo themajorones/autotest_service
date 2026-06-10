@@ -36,7 +36,6 @@ import static dev.themajorones.models.util.ValidationUtils.requireId;
 import static dev.themajorones.models.util.ValidationUtils.requireText;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 @Service
 @RequiredArgsConstructor
@@ -145,14 +144,10 @@ public class AndroidServiceImpl implements AndroidService {
         }
 
         LOG.info("Creating Redroid Android connection name={} dockerId={}", normalized.getName(), normalized.getDockerId());
-        Docker docker = dockerService.getDocker(requireId(normalized.getDockerId(), "Docker connection id"));
-        Android android = AndroidMapper.fromRequest(normalized, docker);
-        Android saved = androidRepository.save(AndroidMapper.toRecord(android));
-
         TaskLog taskLog = taskLogRepository.save(new TaskLog()
             .setType(TaskLogConstant.Type.CREATE_ANDROID)
             .setStatus(TaskLogConstant.Status.PENDING)
-            .setContent(androidTaskContent(saved.getId(), docker.getId(), normalized)));
+            .setContent(androidTaskContent(normalized)));
 
         TaskCommandEnvelope envelope = new TaskCommandEnvelope()
             .setTaskLogId(taskLog.getId())
@@ -167,11 +162,10 @@ public class AndroidServiceImpl implements AndroidService {
         taskLog.setStatus(TaskLogConstant.Status.QUEUED);
         taskLogRepository.save(taskLog);
 
-        LOG.info("Queued Redroid Android creation androidId={} taskLogId={} dockerId={}", saved.getId(), taskLog.getId(), docker.getId());
+        LOG.info("Queued Redroid Android creation taskLogId={} dockerId={}", taskLog.getId(), normalized.getDockerId());
         return Map.of(
             "status", TaskLogConstant.Status.QUEUED,
             "message", "Redroid Android creation queued",
-            "androidId", saved.getId(),
             "taskLogId", taskLog.getId()
         );
     }
@@ -524,25 +518,7 @@ public class AndroidServiceImpl implements AndroidService {
         }
     }
 
-    private String androidTaskContent(Integer androidId, Integer dockerId, CreateAndroidRequest request) {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("androidId", androidId);
-        root.put("dockerId", dockerId);
-        root.put("type", request.getType());
-        root.put("name", request.getName());
-        root.put("image", request.getImage());
-        root.put("accelerationMode", request.getAccelerationMode());
-
-        if (request.getWidth() != null) {
-            root.put("width", request.getWidth());
-        }
-        if (request.getHeight() != null) {
-            root.put("height", request.getHeight());
-        }
-        if (request.getDpi() != null) {
-            root.put("dpi", request.getDpi());
-        }
-
-        return root.toString();
+    private String androidTaskContent(CreateAndroidRequest request) {
+        return JsonUtils.writeJson(objectMapper, request, "Unable to serialize Android task content");
     }
 }
