@@ -34,14 +34,18 @@ class DockerClientTest {
     }
 
     @Test
-    void pullImageConsumesJsonResponseWithoutStringConversion() {
+    void pullImageConsumesStreamingJsonResponseWithoutConversion() {
         RestClient.Builder restClientBuilder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
         DockerClient dockerClient = new DockerClient(restClientBuilder);
 
         server.expect(requestTo("http://docker.example/images/create?fromImage=redroid%2Fredroid%3A12.0.0_64only-latest"))
             .andExpect(method(HttpMethod.POST))
-            .andRespond(withSuccess("{\"status\":\"Downloading\"}", MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess("""
+                {"status":"Pulling from redroid/redroid"}
+                {"status":"Downloading","id":"layer-1"}
+                {"status":"Pull complete","id":"layer-1"}
+                """, MediaType.APPLICATION_JSON));
 
         dockerClient.pullImage("http://docker.example", "redroid/redroid:12.0.0_64only-latest");
 

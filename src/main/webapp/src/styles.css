@@ -210,13 +210,33 @@ p {
 .form-grid {
   align-items: end;
   display: grid;
-  gap: 14px;
+  gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   width: 100%;
 }
 
+.ollama-form-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(240px, auto);
+}
+
 .compact-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.redroid-android-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(140px, auto);
+}
+
+.direct-android-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(140px, auto);
+}
+
+.android-form-grid > .form-actions {
+  justify-self: end;
+}
+
+.android-form-grid > .form-actions > button {
+  width: auto;
 }
 
 .span-all {
@@ -226,22 +246,24 @@ p {
 .form-actions {
   align-self: end;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  flex-wrap: nowrap;
+  gap: 8px;
   justify-content: flex-end;
   min-width: 0;
 }
 
 .form-actions > button {
   flex: 0 0 auto;
-  width: 160px;
+  min-width: 0;
+  white-space: nowrap;
+  width: auto;
 }
 
 .field-group {
   border: 1px solid #dfe5e8;
   border-radius: 8px;
   margin: 0;
-  padding: 14px;
+  padding: 12px;
   min-width: 0;
 }
 
@@ -342,7 +364,7 @@ pre {
 
 .detail-grid {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
@@ -371,6 +393,19 @@ pre {
   margin-top: 24px;
 }
 
+.table-actions {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.table-actions button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 10px;
+  white-space: nowrap;
+  width: auto;
+}
+
 @media (max-width: 520px) {
   .app-shell {
     width: auto;
@@ -392,6 +427,7 @@ pre {
   }
 
   .form-actions {
+    flex-wrap: wrap;
     justify-self: stretch;
     min-width: 0;
   }
@@ -402,6 +438,11 @@ pre {
   }
 
   .compact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .redroid-android-grid,
+  .direct-android-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -617,7 +617,7 @@ export function App() {
       {tab === 'ollama' && (
         <section className="panel">
           <form className="form-shell" onSubmit={(event) => submitOllama(event).catch((error) => setStatus(message(error)))}>
-            <div className="form-fields form-grid">
+            <div className="form-fields form-grid ollama-form-grid">
               <label>
                 Name
                 <input value={ollamaForm.name} onChange={(event) => setOllamaForm({ ...ollamaForm, name: event.target.value })} />
@@ -716,7 +716,7 @@ export function App() {
       {tab === 'android' && (
         <section className="panel">
           <form className="form-shell" onSubmit={(event) => submitAndroid(event).catch((error) => setStatus(message(error)))}>
-            <div className="form-fields form-grid">
+            <div className={`form-fields form-grid android-form-grid ${isDirectAndroidForm ? 'direct-android-grid' : 'redroid-android-grid'}`}>
               <label>
                 Type
                 <select
