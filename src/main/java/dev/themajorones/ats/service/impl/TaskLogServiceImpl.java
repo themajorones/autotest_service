@@ -73,6 +73,9 @@ public class TaskLogServiceImpl implements TaskLogService {
         if (TaskLogConstant.Type.CREATE_ANDROID.equals(type)) {
             return RabbitMqConstant.Queue.Android.ROUTING_KEY;
         }
+        if (TaskLogConstant.Type.INSTALL_APK.equals(type)) {
+            return RabbitMqConstant.Queue.Artifact.ROUTING_KEY;
+        }
         throw new IllegalArgumentException("Unsupported task log type: " + type);
     }
 }

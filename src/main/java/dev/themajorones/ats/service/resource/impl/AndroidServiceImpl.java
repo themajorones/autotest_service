@@ -29,7 +29,6 @@ import dev.themajorones.models.dto.RedroidImageOption;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
 import dev.themajorones.models.entity.Android;
 import dev.themajorones.models.entity.AndroidDetails;
-import dev.themajorones.models.entity.Docker;
 import dev.themajorones.models.entity.TaskLog;
 import dev.themajorones.models.mapper.AndroidMapper;
 import dev.themajorones.models.util.JsonUtils;

@@ -1,9 +1,11 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { clearStoredAuthTokens, deleteResource, exchangeAuthCode, getJson, sendJson, setStoredAuthTokens } from './api';
+import { clearStoredAuthTokens, deleteResource, exchangeAuthCode, getBlob, getJson, sendFormData, sendJson, setStoredAuthTokens } from './api';
 
-type Tab = 'ollama' | 'docker' | 'android' | 'logs';
-type HealthTab = Exclude<Tab, 'logs'>;
+type Tab = 'ollama' | 'docker' | 'android' | 'artifacts' | 'logs';
+type HealthTab = Exclude<Tab, 'logs' | 'artifacts'>;
+type ArtifactFilter = 'all' | 'upload' | 'artifact';
+type ArtifactSource = 'UPLOAD' | 'ARTIFACT';
 
 type Ollama = {
   id: number;
@@ -119,6 +121,34 @@ type AndroidCreateResponse = {
   androidId?: number;
 };
 
+type Artifact = {
+  id: number;
+  source: ArtifactSource;
+  name: string;
+  size?: number | null;
+  githubArtifactId?: number | null;
+  repoId?: number | null;
+  repoFullName?: string | null;
+  workflowRunId?: number | null;
+  workflowId?: number | null;
+  headSha?: string | null;
+  storageKey?: string | null;
+  originalFileName?: string | null;
+  contentType?: string | null;
+};
+
+type ArtifactUploadFormState = {
+  name: string;
+  file: File | null;
+};
+
+type ArtifactAndroidSelectionState = {
+  query: string;
+  open: boolean;
+  androidId: number | null;
+  searchActive: boolean;
+};
+
 const REDROID_IMAGE_FALLBACK = 'redroid/redroid:16.0.0-latest';
 const REDROID_RESOLUTION_PRESETS: AndroidResolutionPreset[] = [
   { id: '1080x2400', label: '1080 x 2400', width: 1080, height: 2400 },
@@ -141,9 +171,21 @@ export function App() {
   const [ollama, setOllama] = useState<Ollama[]>([]);
   const [docker, setDocker] = useState<Docker[]>([]);
   const [android, setAndroid] = useState<Android[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [logs, setLogs] = useState<TaskLog[]>([]);
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [redroidImages, setRedroidImages] = useState<RedroidImageOption[]>([]);
+  const [artifactFilter, setArtifactFilter] = useState<ArtifactFilter>('all');
+  const [artifactAndroidSelection, setArtifactAndroidSelection] = useState<ArtifactAndroidSelectionState>({
+    query: '',
+    open: false,
+    androidId: null,
+    searchActive: false,
+  });
+  const [artifactUploadForm, setArtifactUploadForm] = useState<ArtifactUploadFormState>({
+    name: '',
+    file: null,
+  });
   const [lastHealthChecks, setLastHealthChecks] = useState<Record<HealthTab, Record<number, number>>>({
     ollama: {},
     docker: {},
@@ -159,6 +201,7 @@ export function App() {
   const ollamaRef = useRef<Ollama[]>([]);
   const dockerRef = useRef<Docker[]>([]);
   const androidRef = useRef<Android[]>([]);
+  const artifactUploadFormRef = useRef<HTMLFormElement | null>(null);
 
   const [editingOllamaId, setEditingOllamaId] = useState<number | null>(null);
   const [editingDockerId, setEditingDockerId] = useState<number | null>(null);
@@ -202,9 +245,21 @@ export function App() {
       return;
     }
     loadTab(tab)
-      .then(() => refreshTabHealth(tab))
+      .then(() => {
+        if (tab !== 'logs' && tab !== 'artifacts') {
+          return refreshTabHealth(tab as HealthTab);
+        }
+        return undefined;
+      })
       .catch((error) => setStatus(message(error)));
   }, [tab, authLoading]);
+
+  useEffect(() => {
+    if (authLoading || tab !== 'artifacts') {
+      return;
+    }
+    loadArtifacts(artifactFilter).catch((error) => setStatus(message(error)));
+  }, [artifactFilter, authLoading, tab]);
 
   useEffect(() => {
     ollamaRef.current = ollama;
@@ -219,8 +274,46 @@ export function App() {
   }, [android]);
 
   useEffect(() => {
+    if (tab !== 'artifacts' || android.length === 0) {
+      return;
+    }
+    setArtifactAndroidSelection((current) => {
+      const selected = android.find((row) => row.id === current.androidId) || null;
+      if (selected) {
+        const nextQuery = current.searchActive ? current.query : artifactAndroidLabel(selected, healthStatuses.android);
+        return {
+          ...current,
+          query: nextQuery,
+        };
+      }
+      const next = pickDefaultArtifactAndroid(android, healthStatuses.android);
+      if (!next) {
+        return {
+          ...current,
+          androidId: null,
+          query: '',
+          searchActive: false,
+        };
+      }
+      return {
+        ...current,
+        androidId: next.id,
+        query: artifactAndroidLabel(next, healthStatuses.android),
+        searchActive: false,
+      };
+    });
+  }, [android, healthStatuses.android, tab]);
+
+  useEffect(() => {
     if (authLoading) {
       return;
+    }
+    if (tab === 'artifacts') {
+      const timer = window.setInterval(() => {
+        refreshTabHealth('android')
+          .catch((error) => setStatus(message(error)));
+      }, 5_000);
+      return () => window.clearInterval(timer);
     }
     const timer = window.setInterval(() => {
       if (tab === 'logs') {
@@ -229,7 +322,7 @@ export function App() {
       }
       refreshTabHealth(tab)
         .catch((error) => setStatus(message(error)));
-    }, 10_000);
+    }, 5_000);
     return () => window.clearInterval(timer);
   }, [tab, authLoading]);
 
@@ -262,6 +355,9 @@ export function App() {
       await loadDocker();
     } else if (nextTab === 'android') {
       await Promise.all([loadDocker(), loadAndroid()]);
+    } else if (nextTab === 'artifacts') {
+      await Promise.all([loadAndroid(), loadArtifacts()]);
+      await refreshTabHealth('android');
     } else {
       await loadLogs();
     }
@@ -307,10 +403,64 @@ export function App() {
     setLogs(await getJson<TaskLog[]>('/api/task-logs'));
   }
 
+  async function loadArtifacts(source: ArtifactFilter = artifactFilter) {
+    const query = source === 'all' ? '' : `?source=${encodeURIComponent(source)}`;
+    setArtifacts(await getJson<Artifact[]>(`/api/artifacts${query}`));
+  }
+
   async function retryTaskLog(id: number) {
     const taskLog = await sendJson<TaskLog>(`/api/task-logs/${id}/retry`, 'POST');
     await loadLogs();
     setStatus(`Retry queued for task log #${taskLog.id}`);
+  }
+
+  async function submitArtifactUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!artifactUploadForm.file) {
+      setStatus('Please choose an APK file');
+      return;
+    }
+    const formData = new FormData();
+    if (artifactUploadForm.name.trim()) {
+      formData.set('name', artifactUploadForm.name.trim());
+    }
+    formData.set('file', artifactUploadForm.file);
+    await sendFormData<Artifact>('/api/artifacts', 'POST', formData);
+    setStatus('Artifact uploaded');
+    setArtifactUploadForm({ name: '', file: null });
+    artifactUploadFormRef.current?.reset();
+    await loadArtifacts(artifactFilter);
+  }
+
+  async function downloadArtifact(row: Artifact) {
+    const blob = await getBlob(`/api/artifacts/${row.id}/download`);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${artifactDownloadName(row)}.apk`;
+    link.click();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 5_000);
+    setStatus(`Downloading ${row.name}`);
+  }
+
+  async function deleteArtifact(row: Artifact) {
+    await deleteResource(`/api/artifacts/${row.id}`);
+    setArtifacts((current) => current.filter((artifact) => artifact.id !== row.id));
+    setStatus(`Deleted ${row.name}`);
+  }
+
+  async function installArtifact(row: Artifact) {
+    const target = selectedArtifactAndroid(android, healthStatuses.android, artifactAndroidSelection.androidId);
+    if (!target) {
+      setStatus('Select an active Android device first');
+      return;
+    }
+    if (!isArtifactAndroidActive(target, healthStatuses.android)) {
+      setStatus('Select an active Android device first');
+      return;
+    }
+    const taskLog = await sendJson<TaskLog>(`/api/artifacts/${row.id}/install`, 'POST', { androidId: target.id });
+    setStatus(`Queued install task #${taskLog.id} for ${row.name}`);
   }
 
   function markHealthChecked(nextTab: HealthTab, checks: HealthResponse[]) {
@@ -583,6 +733,17 @@ export function App() {
   }
 
   const isDirectAndroidForm = androidForm.type === 'DIRECT';
+  const selectedArtifactAndroidTarget = selectedArtifactAndroid(android, healthStatuses.android, artifactAndroidSelection.androidId);
+  const selectedArtifactAndroidReady = selectedArtifactAndroidTarget != null && isArtifactAndroidActive(selectedArtifactAndroidTarget, healthStatuses.android);
+  const selectedArtifactAndroidStatus = selectedArtifactAndroidTarget
+    ? artifactAndroidStatusLabel(selectedArtifactAndroidTarget, healthStatuses.android)
+    : 'Pick device';
+  const artifactAndroidOptions = filterArtifactAndroidOptions(
+    android,
+    healthStatuses.android,
+    artifactAndroidSelection.query,
+    artifactAndroidSelection.searchActive,
+  );
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -602,7 +763,7 @@ export function App() {
       </header>
 
       <nav className="tabs" aria-label="Connection manager sections">
-        {(['ollama', 'docker', 'android', 'logs'] as Tab[]).map((item) => (
+        {(['ollama', 'docker', 'android', 'artifacts', 'logs'] as Tab[]).map((item) => (
           <button
             key={item}
             className={tab === item ? 'active' : ''}
@@ -1002,6 +1163,179 @@ export function App() {
         </section>
       )}
 
+      {tab === 'artifacts' && (
+        <section className="panel artifacts-panel">
+          <div className="artifact-toolbar">
+            <label className="artifact-card artifact-filter-card artifact-toolbar-field artifact-filter">
+              <span>Source</span>
+              <select value={artifactFilter} onChange={(event) => setArtifactFilter(event.target.value as ArtifactFilter)}>
+                <option value="all">All</option>
+                <option value="upload">Upload</option>
+                <option value="artifact">Artifact</option>
+              </select>
+            </label>
+            <div className="artifact-card artifact-device-card artifact-toolbar-field artifact-device-picker">
+              <div className="artifact-toolbar-label-row">
+                <span>Android device</span>
+                <span className={`artifact-device-badge ${selectedArtifactAndroidReady ? 'is-active' : 'is-empty'}`}>
+                  {selectedArtifactAndroidStatus}
+                </span>
+              </div>
+              <div className="artifact-combobox">
+                <input
+                  value={artifactAndroidSelection.query}
+                  placeholder="Search Android device"
+                  onFocus={() => setArtifactAndroidSelection((current) => ({ ...current, open: true }))}
+                  onBlur={() => window.setTimeout(() => {
+                    setArtifactAndroidSelection((current) => {
+                      const next = selectedArtifactAndroid(android, healthStatuses.android, current.androidId);
+                      if (!next) {
+                        return {
+                          ...current,
+                          androidId: null,
+                          query: '',
+                          open: false,
+                          searchActive: false,
+                        };
+                      }
+                      return {
+                        ...current,
+                        androidId: next.id,
+                        query: artifactAndroidLabel(next, healthStatuses.android),
+                        open: false,
+                        searchActive: false,
+                      };
+                    });
+                  }, 120)}
+                  onChange={(event) => setArtifactAndroidSelection((current) => ({
+                    ...current,
+                    query: event.target.value,
+                    open: true,
+                    searchActive: true,
+                  }))}
+                />
+              </div>
+              <div className={`artifact-combobox-menu ${artifactAndroidSelection.open ? 'is-open' : ''}`}>
+                {artifactAndroidOptions.length === 0 ? (
+                  <p className="artifact-combobox-empty">No matching Android devices.</p>
+                ) : (
+                  artifactAndroidOptions.map((option) => {
+                    const isSelected = option.id === artifactAndroidSelection.androidId;
+                    const isActive = isArtifactAndroidActive(option, healthStatuses.android);
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`artifact-combobox-option ${isSelected ? 'is-selected' : ''}`}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          setArtifactAndroidSelection({
+                            androidId: option.id,
+                            query: artifactAndroidLabel(option, healthStatuses.android),
+                            open: false,
+                            searchActive: false,
+                          });
+                        }}
+                      >
+                        <span className="artifact-combobox-option-title">{artifactAndroidLabel(option, healthStatuses.android)}</span>
+                        <span className={`artifact-combobox-option-status ${isActive ? 'is-active' : 'is-inactive'}`}>
+                          {artifactAndroidStatusLabel(option, healthStatuses.android)}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+            <form
+              ref={artifactUploadFormRef}
+              className="artifact-card artifact-upload-card artifact-upload-inline"
+              onSubmit={(event) => submitArtifactUpload(event).catch((error) => setStatus(message(error)))}
+            >
+              <label className="artifact-toolbar-field">
+                <span>Display name</span>
+                <input
+                  value={artifactUploadForm.name}
+                  onChange={(event) => setArtifactUploadForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="Optional"
+                />
+              </label>
+              <label className="artifact-toolbar-field artifact-file-input">
+                <span>APK file</span>
+                <input
+                  accept=".apk,application/vnd.android.package-archive"
+                  type="file"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setArtifactUploadForm((current) => ({
+                      ...current,
+                      file,
+                      name: current.name.trim()
+                        ? current.name
+                        : file == null
+                          ? ''
+                          : stripApkSuffix(file.name),
+                    }));
+                  }}
+                />
+              </label>
+              <button className="artifact-save-button" type="submit">Save APK</button>
+            </form>
+          </div>
+          <DataTable
+            rows={artifacts}
+            columns={['name', 'source', 'size', 'repoFullName', 'workflowRunId', 'githubArtifactId']}
+            columnLabels={{
+              repoFullName: 'Repo',
+              workflowRunId: 'Run ID',
+              githubArtifactId: 'GitHub ID',
+            }}
+            renderActions={(row) => {
+              const typedRow = row as Artifact;
+              return (
+                <>
+                  <button type="button" onClick={() => downloadArtifact(typedRow).catch((error) => setStatus(message(error)))}>
+                    Download
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedArtifactAndroidReady}
+                    onClick={() => installArtifact(typedRow).catch((error) => setStatus(message(error)))}
+                  >
+                    Install
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteArtifact(typedRow).catch((error) => setStatus(message(error)))}
+                  >
+                    Delete
+                  </button>
+                </>
+              );
+            }}
+            renderCell={(row, column) => {
+              const typedRow = row as Artifact;
+              if (column === 'source') {
+                return <span className={`artifact-source-badge source-${typedRow.source.toLowerCase()}`}>{artifactSourceLabel(typedRow.source)}</span>;
+              }
+              if (column === 'size') {
+                return formatArtifactSize(typedRow.size);
+              }
+              if (column === 'repoFullName') {
+                return typedRow.repoFullName || '-';
+              }
+              if (column === 'workflowRunId') {
+                return typedRow.workflowRunId == null ? '-' : typedRow.workflowRunId;
+              }
+              if (column === 'githubArtifactId') {
+                return typedRow.githubArtifactId == null ? '-' : typedRow.githubArtifactId;
+              }
+              return undefined;
+            }}
+          />
+        </section>
+      )}
+
       {tab === 'logs' && (
         <section className="panel">
           <div className="button-row">
@@ -1300,7 +1634,7 @@ function formatTaskLogDuration(taskLog: Pick<TaskLog, 'startedAt' | 'endedAt'>) 
 function tabFromLocationPath(): Tab {
   const parts = window.location.pathname.split('/').filter(Boolean);
   const value = parts[parts.length - 1];
-  if (value === 'ollama' || value === 'docker' || value === 'android' || value === 'logs') {
+  if (value === 'ollama' || value === 'docker' || value === 'android' || value === 'artifacts' || value === 'logs') {
     return value;
   }
   return 'ollama';
@@ -1344,7 +1678,13 @@ function taskStatusClass(status: string) {
 }
 
 function label(tab: Tab) {
-  return tab === 'android' ? 'Android' : tab[0].toUpperCase() + tab.slice(1);
+  if (tab === 'android') {
+    return 'Android';
+  }
+  if (tab === 'artifacts') {
+    return 'Artifacts';
+  }
+  return tab[0].toUpperCase() + tab.slice(1);
 }
 
 function parseOptionalInteger(value: string) {
@@ -1357,4 +1697,96 @@ function parseOptionalInteger(value: string) {
 
 function message(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed';
+}
+
+function formatArtifactSize(size?: number | null) {
+  if (size == null) {
+    return '-';
+  }
+  return `${Number(size).toFixed(2)} MB`;
+}
+
+function artifactSourceLabel(source: ArtifactSource) {
+  return source === 'UPLOAD' ? 'Upload' : 'Artifact';
+}
+
+function artifactDownloadName(artifact: Artifact) {
+  const base = artifact.originalFileName || artifact.name || `artifact-${artifact.id}`;
+  return stripApkSuffix(base);
+}
+
+function artifactAndroidLabel(android: Android, statuses: Record<number, string>) {
+  const address = formatAndroidAddress(android);
+  const status = artifactAndroidStatusLabel(android, statuses);
+  const name = android.name || `android-${android.id}`;
+  return address ? `${name} · ${address} · ${status}` : `${name} · ${status}`;
+}
+
+function artifactAndroidStatusLabel(android: Android, statuses: Record<number, string>) {
+  const status = statuses[android.id] || android.status || 'UNKNOWN';
+  return status;
+}
+
+function isArtifactAndroidActive(android: Android, statuses: Record<number, string>) {
+  const status = artifactAndroidStatusLabel(android, statuses);
+  return Boolean(formatAndroidAddress(android)) && (status === 'CONNECTED' || status === 'RUNNING');
+}
+
+function selectedArtifactAndroid(rows: Android[], statuses: Record<number, string>, androidId: number | null) {
+  if (androidId != null) {
+    const selected = rows.find((row) => row.id === androidId) || null;
+    if (selected) {
+      return selected;
+    }
+  }
+  return pickDefaultArtifactAndroid(rows, statuses);
+}
+
+function pickDefaultArtifactAndroid(rows: Android[], statuses: Record<number, string>) {
+  const active = rows.find((row) => isArtifactAndroidActive(row, statuses));
+  return active || rows[0] || null;
+}
+
+function filterArtifactAndroidOptions(rows: Android[], statuses: Record<number, string>, query: string, searchActive: boolean) {
+  const normalized = query.trim().toLowerCase();
+  if (!searchActive) {
+    return [...rows].sort((left, right) => {
+      const leftActive = isArtifactAndroidActive(left, statuses) ? 1 : 0;
+      const rightActive = isArtifactAndroidActive(right, statuses) ? 1 : 0;
+      if (leftActive !== rightActive) {
+        return rightActive - leftActive;
+      }
+      return left.name.localeCompare(right.name);
+    });
+  }
+  return [...rows]
+    .sort((left, right) => {
+      const leftActive = isArtifactAndroidActive(left, statuses) ? 1 : 0;
+      const rightActive = isArtifactAndroidActive(right, statuses) ? 1 : 0;
+      if (leftActive !== rightActive) {
+        return rightActive - leftActive;
+      }
+      return left.name.localeCompare(right.name);
+    })
+    .filter((row) => {
+      if (!normalized) {
+        return true;
+      }
+      const haystack = [
+        row.name,
+        row.dockerName,
+        row.type,
+        row.adbHost,
+        row.adbPort == null ? '' : String(row.adbPort),
+        artifactAndroidStatusLabel(row, statuses),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(normalized);
+    });
+}
+
+function stripApkSuffix(value: string) {
+  if (value.toLowerCase().endsWith('.apk')) {
+    return value.slice(0, -4);
+  }
+  return value;
 }

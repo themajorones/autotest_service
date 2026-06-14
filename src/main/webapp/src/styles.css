@@ -199,6 +199,186 @@ p {
   gap: 24px;
 }
 
+.artifacts-panel {
+  gap: 18px;
+}
+
+.artifact-toolbar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(130px, 0.58fr) minmax(280px, 1.2fr) minmax(420px, 1.6fr);
+  align-items: end;
+}
+
+.artifact-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfc 100%);
+  border: 1px solid #dfe5e8;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(23, 32, 38, 0.04);
+  padding: 12px 14px;
+}
+
+.artifact-toolbar-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.artifact-toolbar-label-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.artifact-device-badge {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 5px 10px;
+  text-transform: uppercase;
+}
+
+.artifact-device-badge.is-active {
+  background: #e6f4ea;
+  color: #0f6c32;
+}
+
+.artifact-device-badge.is-empty {
+  background: #f5f7f8;
+  color: #61727d;
+}
+
+.artifact-filter {
+  min-width: 130px;
+}
+
+.artifact-device-picker {
+  position: relative;
+}
+
+.artifact-upload-inline {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  min-width: 0;
+}
+
+.artifact-combobox {
+  display: grid;
+  gap: 6px;
+}
+
+.artifact-combobox input {
+  width: 100%;
+}
+
+.artifact-combobox-menu {
+  background: #ffffff;
+  border: 1px solid #dfe5e8;
+  border-radius: 12px;
+  box-shadow: 0 18px 38px rgba(23, 32, 38, 0.12);
+  display: none;
+  gap: 8px;
+  left: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+}
+
+.artifact-combobox-menu.is-open {
+  display: grid;
+}
+
+.artifact-combobox-empty {
+  color: #677782;
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 8px 2px;
+}
+
+.artifact-combobox-option {
+  align-items: start;
+  background: #fff;
+  border: 1px solid #dfe5e8;
+  border-radius: 12px;
+  color: #18232a;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.artifact-combobox-option:hover,
+.artifact-combobox-option.is-selected {
+  border-color: #9eb0ba;
+  box-shadow: 0 10px 20px rgba(23, 32, 38, 0.06);
+}
+
+.artifact-combobox-option-title {
+  font-weight: 700;
+}
+
+.artifact-combobox-option-status {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.artifact-combobox-option-status.is-active {
+  background: #e6f4ea;
+  color: #0f6c32;
+}
+
+.artifact-combobox-option-status.is-inactive {
+  background: #f3f4f6;
+  color: #5e6b76;
+}
+
+.artifact-file-input input {
+  padding-top: 9px;
+}
+
+.artifact-save-button {
+  min-height: 42px;
+  white-space: nowrap;
+  justify-self: end;
+}
+
+.artifact-source-badge {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px 10px;
+  text-transform: uppercase;
+}
+
+.artifact-source-badge.source-upload {
+  background: #e7f7ec;
+  border-color: #b8e7c5;
+  color: #117a35;
+}
+
+.artifact-source-badge.source-artifact {
+  background: #eef2ff;
+  border-color: #ccd7ff;
+  color: #3949ab;
+}
+
 .form-shell {
   width: 100%;
 }
@@ -406,6 +586,20 @@ pre {
   width: auto;
 }
 
+@media (max-width: 1100px) {
+  .artifact-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .artifact-card {
+    width: 100%;
+  }
+
+  .artifact-upload-inline {
+    grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.2fr) auto;
+  }
+}
+
 @media (max-width: 520px) {
   .app-shell {
     width: auto;
@@ -439,6 +633,23 @@ pre {
 
   .compact-grid {
     grid-template-columns: 1fr;
+  }
+
+  .artifact-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .artifact-card {
+    width: 100%;
+  }
+
+  .artifact-upload-inline {
+    grid-template-columns: 1fr;
+  }
+
+  .artifact-save-button {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .redroid-android-grid,

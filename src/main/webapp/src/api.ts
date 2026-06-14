@@ -67,6 +67,24 @@ export async function sendJson<T>(path: string, method: 'POST' | 'PUT', body?: u
   return response.json() as Promise<T>;
 }
 
+export async function sendFormData<T>(path: string, method: 'POST' | 'PUT', body: FormData): Promise<T> {
+  const response = await request(path, {
+    method,
+    body,
+  });
+  await assertOk(response);
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return response.json() as Promise<T>;
+}
+
+export async function getBlob(path: string): Promise<Blob> {
+  const response = await request(path, { headers: { Accept: '*/*' } });
+  await assertOk(response);
+  return response.blob();
+}
+
 export async function deleteResource(path: string): Promise<void> {
   const response = await request(path, { method: 'DELETE' });
   await assertOk(response);

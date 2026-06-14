@@ -3,11 +3,9 @@ package dev.themajorones.ats.repository;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
 import dev.themajorones.models.entity.GitHubRepo;
 import dev.themajorones.models.entity.GitHubWorkflowRun;
 
-@Repository
 public interface GitHubWorkflowRunRepository extends JpaRepository<GitHubWorkflowRun, Integer> {
 
     Optional<GitHubWorkflowRun> findByGithubRunId(Long githubRunId);

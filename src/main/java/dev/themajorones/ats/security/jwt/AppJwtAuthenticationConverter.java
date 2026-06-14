@@ -49,7 +49,6 @@ public class AppJwtAuthenticationConverter implements Converter<Jwt, AbstractAut
         return value == null ? null : String.valueOf(value);
     }
 
-    @SuppressWarnings("unchecked")
     private List<String> claimAsStringList(Jwt jwt, String name) {
         Object value = jwt.getClaims().get(name);
         if (value == null) {
