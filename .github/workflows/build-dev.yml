@@ -1,10 +1,10 @@
 name: Build & Deploy Dev
 
 on:
-  push:
-    branches:
-      - dev
-      - feat/phongpt/build-optimization
+  #push:
+  #  branches:
+  #    - dev
+  #    - feat/phongpt/build-optimization
   workflow_dispatch:
 
 concurrency:

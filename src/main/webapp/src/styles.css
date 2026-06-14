@@ -199,24 +199,42 @@ p {
   gap: 24px;
 }
 
+.form-shell {
+  width: 100%;
+}
+
+.form-fields {
+  min-width: 0;
+}
+
 .form-grid {
   align-items: end;
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  width: 100%;
 }
 
 .compact-grid {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.span-all,
-.form-actions {
+.span-all {
   grid-column: 1 / -1;
 }
 
 .form-actions {
-  justify-content: flex-start;
+  align-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.form-actions > button {
+  flex: 0 0 auto;
+  width: 160px;
 }
 
 .field-group {
@@ -367,5 +385,23 @@ pre {
   .topbar button,
   .form-grid button {
     width: 100%;
+  }
+
+  .form-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    justify-self: stretch;
+    min-width: 0;
+  }
+
+  .form-actions > button {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .compact-grid {
+    grid-template-columns: 1fr;
   }
 }

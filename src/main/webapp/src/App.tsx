@@ -55,6 +55,29 @@ type RedroidImageOption = {
   value: string;
 };
 
+type AndroidResolutionPreset = {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+};
+
+type AndroidFormState = {
+  type: 'REDROID' | 'DIRECT';
+  dockerId: string;
+  name: string;
+  image: string;
+  accelerationMode: string;
+  width: string;
+  height: string;
+  dpi: string;
+  resolutionPreset: string;
+  adbHost: string;
+  adbPort: string;
+  pairPort: string;
+  pairCode: string;
+};
+
 type AuthInfo = {
   userId?: number;
   githubId?: number;
@@ -97,9 +120,22 @@ type AndroidCreateResponse = {
 };
 
 const REDROID_IMAGE_FALLBACK = 'redroid/redroid:16.0.0-latest';
+const REDROID_RESOLUTION_PRESETS: AndroidResolutionPreset[] = [
+  { id: '1080x2400', label: '1080 x 2400', width: 1080, height: 2400 },
+  { id: '1080x2340', label: '1080 x 2340', width: 1080, height: 2340 },
+  { id: '1920x1200', label: '1920 x 1200', width: 1920, height: 1200 },
+  { id: '2560x1600', label: '2560 x 1600', width: 2560, height: 1600 },
+  { id: '720x1280', label: '720 x 1280', width: 720, height: 1280 },
+  { id: '1080x1920', label: '1080 x 1920', width: 1080, height: 1920 },
+  { id: '1000x1200', label: '1000 x 1200', width: 1000, height: 1200 },
+];
+
+function defaultRedroidImage(options: RedroidImageOption[]) {
+  return options[0]?.value || REDROID_IMAGE_FALLBACK;
+}
 
 export function App() {
-  const [tab, setTab] = useState<Tab>('ollama');
+  const [tab, setTab] = useState<Tab>(() => tabFromLocationPath());
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [ollama, setOllama] = useState<Ollama[]>([]);
@@ -139,23 +175,26 @@ export function App() {
     baseUrl: 'http://bigscreen:2375',
     enabled: true,
   });
-  const [androidForm, setAndroidForm] = useState({
-    type: 'REDROID',
-    dockerId: '',
-    name: '',
-    image: REDROID_IMAGE_FALLBACK,
-    accelerationMode: '',
-    width: '',
-    height: '',
-    dpi: '',
-    adbHost: '',
-    adbPort: '',
-    pairPort: '',
-    pairCode: '',
-  });
+  const [androidForm, setAndroidForm] = useState<AndroidFormState>(() => createAndroidFormState([], 'REDROID'));
 
   useEffect(() => {
     void bootstrap();
+  }, []);
+
+  useEffect(() => {
+    const nextPath = tabToPath(tab);
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    if (currentPath !== nextPath) {
+      window.history.pushState({}, document.title, nextPath);
+    }
+  }, [tab]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setTab(tabFromLocationPath());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   useEffect(() => {
@@ -201,7 +240,10 @@ export function App() {
       if (authCode) {
         const tokens = await exchangeAuthCode(authCode);
         setStoredAuthTokens(tokens);
-        window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
+        params.delete('authCode');
+        const nextSearch = params.toString();
+        const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`;
+        window.history.replaceState({}, document.title, nextUrl);
       }
       const info = await getJson<AuthInfo>('/auth/info');
       setAuthInfo(info);
@@ -304,8 +346,25 @@ export function App() {
     }));
   }
 
-  function defaultRedroidImage(options: RedroidImageOption[]) {
-    return options[0]?.value || REDROID_IMAGE_FALLBACK;
+  function syncResolutionPreset(nextWidth: string, nextHeight: string) {
+    return findResolutionPreset(nextWidth, nextHeight)?.id || 'custom';
+  }
+
+  function applyResolutionPreset(presetId: string) {
+    if (presetId === 'custom') {
+      setAndroidForm((current) => ({ ...current, resolutionPreset: 'custom' }));
+      return;
+    }
+    const preset = REDROID_RESOLUTION_PRESETS.find((item) => item.id === presetId);
+    if (!preset) {
+      return;
+    }
+    setAndroidForm((current) => ({
+      ...current,
+      resolutionPreset: preset.id,
+      width: String(preset.width),
+      height: String(preset.height),
+    }));
   }
 
   async function fetchOllamaModels() {
@@ -354,17 +413,20 @@ export function App() {
       setStatus('Please select a Docker connection before saving the Android');
       return;
     }
-    if (!androidForm.image.trim() || !androidForm.accelerationMode.trim()) {
-      setStatus('Image and acceleration are required for Redroid');
+    if (!androidForm.image.trim()) {
+      setStatus('Image is required for Redroid');
       return;
     }
     const width = parseOptionalInteger(androidForm.width);
     const height = parseOptionalInteger(androidForm.height);
     const dpi = parseOptionalInteger(androidForm.dpi);
+    const name = androidForm.name.trim() || generateAndroidName();
     const payload = {
-      ...androidForm,
+      name,
       dockerId,
-      type: 'REDROID',
+      type: 'REDROID' as const,
+      image: androidForm.image,
+      accelerationMode: androidForm.accelerationMode || 'AUTO',
       width,
       height,
       dpi,
@@ -399,7 +461,7 @@ export function App() {
     }
     const payload = {
       type: 'DIRECT',
-      name: androidForm.name || androidForm.adbHost.trim(),
+      name: androidForm.name.trim() || generateAndroidName(),
       adbHost: androidForm.adbHost.trim(),
       adbPort,
       pairPort,
@@ -439,16 +501,21 @@ export function App() {
     const nextImage = redroidImages.some((option) => option.value === row.image)
       ? row.image
       : defaultRedroidImage(redroidImages);
+    const nextResolutionPreset = findResolutionPreset(
+      row.width == null ? '' : String(row.width),
+      row.height == null ? '' : String(row.height),
+    )?.id || 'custom';
     setEditingAndroidId(row.id);
     setAndroidForm({
       type: row.type === 'DIRECT' ? 'DIRECT' : 'REDROID',
       dockerId: row.dockerId == null ? '' : String(row.dockerId),
       name: row.name,
       image: row.type === 'DIRECT' ? '' : nextImage,
-      accelerationMode: row.accelerationMode || '',
+      accelerationMode: row.accelerationMode || 'AUTO',
       width: row.width == null ? '' : String(row.width),
       height: row.height == null ? '' : String(row.height),
       dpi: row.dpi == null ? '' : String(row.dpi),
+      resolutionPreset: nextResolutionPreset,
       adbHost: row.adbHost || '',
       adbPort: row.adbPort == null ? '' : String(row.adbPort),
       pairPort: '',
@@ -512,20 +579,7 @@ export function App() {
 
   function resetAndroidForm() {
     setEditingAndroidId(null);
-    setAndroidForm({
-      type: 'REDROID',
-      dockerId: '',
-      name: '',
-      image: defaultRedroidImage(redroidImages),
-      accelerationMode: '',
-      width: '',
-      height: '',
-      dpi: '',
-      adbHost: '',
-      adbPort: '',
-      pairPort: '',
-      pairCode: '',
-    });
+    setAndroidForm(createAndroidFormState(redroidImages, 'REDROID'));
   }
 
   const isDirectAndroidForm = androidForm.type === 'DIRECT';
@@ -562,38 +616,40 @@ export function App() {
 
       {tab === 'ollama' && (
         <section className="panel">
-          <form className="form-grid" onSubmit={(event) => submitOllama(event).catch((error) => setStatus(message(error)))}>
-            <label>
-              Name
-              <input value={ollamaForm.name} onChange={(event) => setOllamaForm({ ...ollamaForm, name: event.target.value })} />
-            </label>
-            <label>
-              Base URL
-              <input value={ollamaForm.baseUrl} onChange={(event) => setOllamaForm({ ...ollamaForm, baseUrl: event.target.value })} />
-            </label>
-            <label>
-              Model
-              <select value={ollamaForm.model} onChange={(event) => setOllamaForm({ ...ollamaForm, model: event.target.value })}>
-                <option value="">Select model</option>
-                {models.map((model) => (
-                  <option key={model.name} value={model.name}>{model.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="checkbox-label">
-              <input
-                checked={ollamaForm.enabled}
-                type="checkbox"
-                onChange={(event) => setOllamaForm({ ...ollamaForm, enabled: event.target.checked })}
-              />
-              Enabled
-            </label>
-            <div className="button-row">
-              <button type="button" onClick={() => fetchOllamaModels().catch((error) => setStatus(message(error)))}>
-                Refresh models
-              </button>
-              <button type="submit">{editingOllamaId == null ? 'Save Ollama' : 'Update Ollama'}</button>
-              {editingOllamaId != null && <button type="button" onClick={resetOllamaForm}>Cancel</button>}
+          <form className="form-shell" onSubmit={(event) => submitOllama(event).catch((error) => setStatus(message(error)))}>
+            <div className="form-fields form-grid">
+              <label>
+                Name
+                <input value={ollamaForm.name} onChange={(event) => setOllamaForm({ ...ollamaForm, name: event.target.value })} />
+              </label>
+              <label>
+                Base URL
+                <input value={ollamaForm.baseUrl} onChange={(event) => setOllamaForm({ ...ollamaForm, baseUrl: event.target.value })} />
+              </label>
+              <label>
+                Model
+                <select value={ollamaForm.model} onChange={(event) => setOllamaForm({ ...ollamaForm, model: event.target.value })}>
+                  <option value="">Select model</option>
+                  {models.map((model) => (
+                    <option key={model.name} value={model.name}>{model.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="checkbox-label">
+                <input
+                  checked={ollamaForm.enabled}
+                  type="checkbox"
+                  onChange={(event) => setOllamaForm({ ...ollamaForm, enabled: event.target.checked })}
+                />
+                Enabled
+              </label>
+              <div className="form-actions">
+                <button type="button" onClick={() => fetchOllamaModels().catch((error) => setStatus(message(error)))}>
+                  Refresh models
+                </button>
+                <button type="submit">{editingOllamaId == null ? 'Save Ollama' : 'Update Ollama'}</button>
+                {editingOllamaId != null && <button type="button" onClick={resetOllamaForm}>Cancel</button>}
+              </div>
             </div>
           </form>
           <DataTable
@@ -612,26 +668,28 @@ export function App() {
 
       {tab === 'docker' && (
         <section className="panel">
-          <form className="form-grid" onSubmit={(event) => submitDocker(event).catch((error) => setStatus(message(error)))}>
-            <label>
-              Name
-              <input value={dockerForm.name} onChange={(event) => setDockerForm({ ...dockerForm, name: event.target.value })} />
-            </label>
-            <label>
-              Base URL
-              <input value={dockerForm.baseUrl} onChange={(event) => setDockerForm({ ...dockerForm, baseUrl: event.target.value })} />
-            </label>
-            <label className="checkbox-label">
-              <input
-                checked={dockerForm.enabled}
-                type="checkbox"
-                onChange={(event) => setDockerForm({ ...dockerForm, enabled: event.target.checked })}
-              />
-              Enabled
-            </label>
-            <div className="button-row">
-              <button type="submit">{editingDockerId == null ? 'Save Docker' : 'Update Docker'}</button>
-              {editingDockerId != null && <button type="button" onClick={resetDockerForm}>Cancel</button>}
+          <form className="form-shell" onSubmit={(event) => submitDocker(event).catch((error) => setStatus(message(error)))}>
+            <div className="form-fields form-grid">
+              <label>
+                Name
+                <input value={dockerForm.name} onChange={(event) => setDockerForm({ ...dockerForm, name: event.target.value })} />
+              </label>
+              <label>
+                Base URL
+                <input value={dockerForm.baseUrl} onChange={(event) => setDockerForm({ ...dockerForm, baseUrl: event.target.value })} />
+              </label>
+              <label className="checkbox-label">
+                <input
+                  checked={dockerForm.enabled}
+                  type="checkbox"
+                  onChange={(event) => setDockerForm({ ...dockerForm, enabled: event.target.checked })}
+                />
+                Enabled
+              </label>
+              <div className="form-actions">
+                <button type="submit">{editingDockerId == null ? 'Save Docker' : 'Update Docker'}</button>
+                {editingDockerId != null && <button type="button" onClick={resetDockerForm}>Cancel</button>}
+              </div>
             </div>
           </form>
           <DataTable
@@ -657,142 +715,177 @@ export function App() {
 
       {tab === 'android' && (
         <section className="panel">
-          <form className="form-grid" onSubmit={(event) => submitAndroid(event).catch((error) => setStatus(message(error)))}>
-            <label>
-              Type
-              <select
-                value={androidForm.type}
-                onChange={(event) => {
-                  const type = event.target.value;
-                  setAndroidForm({
-                    ...androidForm,
-                    type,
-                    name: '',
-                    image: type === 'REDROID' ? defaultRedroidImage(redroidImages) : '',
-                    accelerationMode: '',
-                    width: '',
-                    height: '',
-                    dpi: '',
-                    pairCode: '',
-                  });
-                }}
-              >
-                <option value="REDROID">Redroid</option>
-                <option value="DIRECT">Direct ADB</option>
-              </select>
-            </label>
-            <label>
-              Name
-              <input value={androidForm.name} onChange={(event) => setAndroidForm({ ...androidForm, name: event.target.value })} />
-            </label>
-            {!isDirectAndroidForm && (
-              <>
-                <label>
-                  Docker
-                  <select value={androidForm.dockerId || docker[0]?.id || ''} onChange={(event) => setAndroidForm({ ...androidForm, dockerId: event.target.value })}>
-                    {docker.map((item) => (
-                      <option key={item.id} value={item.id}>{item.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Image
-                  <select
-                    value={androidForm.image}
-                    onChange={(event) => setAndroidForm({ ...androidForm, image: event.target.value })}
-                  >
-                    {redroidImages.length === 0 ? (
-                      <option value={REDROID_IMAGE_FALLBACK}>Android 16</option>
-                    ) : (
-                      redroidImages.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </label>
-                <label>
-                  Acceleration
-                  <select value={androidForm.accelerationMode} onChange={(event) => setAndroidForm({ ...androidForm, accelerationMode: event.target.value })}>
-                    <option value="">Select acceleration</option>
-                    <option value="GUEST">GUEST</option>
-                    <option value="HOST">HOST</option>
-                    <option value="AUTO">AUTO</option>
-                  </select>
-                </label>
-                <fieldset className="field-group span-all">
-                  <legend>Redroid options</legend>
-                  <div className="form-grid compact-grid">
-                    <label>
-                      Width
-                      <input
-                        inputMode="numeric"
-                        value={androidForm.width}
-                        onChange={(event) => setAndroidForm({ ...androidForm, width: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      Height
-                      <input
-                        inputMode="numeric"
-                        value={androidForm.height}
-                        onChange={(event) => setAndroidForm({ ...androidForm, height: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      DPI
-                      <input
-                        inputMode="numeric"
-                        value={androidForm.dpi}
-                        onChange={(event) => setAndroidForm({ ...androidForm, dpi: event.target.value })}
-                      />
-                    </label>
+          <form className="form-shell" onSubmit={(event) => submitAndroid(event).catch((error) => setStatus(message(error)))}>
+            <div className="form-fields form-grid">
+              <label>
+                Type
+                <select
+                  value={androidForm.type}
+                  onChange={(event) => {
+                    const type = event.target.value;
+                    setAndroidForm((current) => {
+                      const next = createAndroidFormState(redroidImages, type === 'DIRECT' ? 'DIRECT' : 'REDROID');
+                      return {
+                        ...next,
+                        name: current.name.trim() || next.name,
+                        pairPort: current.pairPort,
+                        pairCode: '',
+                        adbHost: current.adbHost,
+                        adbPort: current.adbPort,
+                      };
+                    });
+                  }}
+                >
+                  <option value="REDROID">Redroid</option>
+                  <option value="DIRECT">Direct ADB</option>
+                </select>
+              </label>
+              <label>
+                Name
+                <input value={androidForm.name} onChange={(event) => setAndroidForm({ ...androidForm, name: event.target.value })} />
+              </label>
+              {!isDirectAndroidForm && (
+                <>
+                  <label>
+                    Docker
+                    <select value={androidForm.dockerId || docker[0]?.id || ''} onChange={(event) => setAndroidForm({ ...androidForm, dockerId: event.target.value })}>
+                      {docker.map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Image
+                    <select
+                      value={androidForm.image}
+                      onChange={(event) => setAndroidForm({ ...androidForm, image: event.target.value })}
+                    >
+                      {redroidImages.length === 0 ? (
+                        <option value={REDROID_IMAGE_FALLBACK}>Android 16</option>
+                      ) : (
+                        redroidImages.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    Acceleration
+                    <select
+                      value={androidForm.accelerationMode || 'AUTO'}
+                      onChange={(event) => setAndroidForm({ ...androidForm, accelerationMode: event.target.value })}
+                    >
+                      <option value="GUEST">GUEST</option>
+                      <option value="HOST">HOST</option>
+                      <option value="AUTO">AUTO</option>
+                    </select>
+                  </label>
+                  <div className="form-actions">
+                    <button type="submit">
+                      {editingAndroidId == null ? 'Create Android' : 'Update Android'}
+                    </button>
+                    {editingAndroidId != null && <button type="button" onClick={resetAndroidForm}>Cancel</button>}
                   </div>
-                </fieldset>
-              </>
-            )}
-            {isDirectAndroidForm && (
-              <>
-                <label>
-                  Host
-                  <input
-                    value={androidForm.adbHost}
-                    onChange={(event) => setAndroidForm({ ...androidForm, adbHost: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Connect Port
-                  <input
-                    inputMode="numeric"
-                    value={androidForm.adbPort}
-                    onChange={(event) => setAndroidForm({ ...androidForm, adbPort: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Pair Port (Optional)
-                  <input
-                    inputMode="numeric"
-                    value={androidForm.pairPort}
-                    onChange={(event) => setAndroidForm({ ...androidForm, pairPort: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Pair Code (Optional)
-                  <input
-                    value={androidForm.pairCode}
-                    onChange={(event) => {
-                      setAndroidForm({ ...androidForm, pairCode: event.target.value });
-                    }}
-                  />
-                </label>
-              </>
-            )}
-            <div className="button-row form-actions">
-              <button type="submit">
-                {editingAndroidId == null ? 'Create Android' : 'Update Android'}
-              </button>
-              {editingAndroidId != null && <button type="button" onClick={resetAndroidForm}>Cancel</button>}
+                  <fieldset className="field-group span-all">
+                    <legend>Redroid options</legend>
+                    <div className="form-grid compact-grid">
+                      <label>
+                        Resolution preset
+                        <select
+                          value={androidForm.resolutionPreset}
+                          onChange={(event) => applyResolutionPreset(event.target.value)}
+                        >
+                          <option value="custom">Custom</option>
+                          {REDROID_RESOLUTION_PRESETS.map((preset) => (
+                            <option key={preset.id} value={preset.id}>
+                              {preset.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Height
+                        <input
+                          inputMode="numeric"
+                          value={androidForm.width}
+                          onChange={(event) => setAndroidForm((current) => {
+                            const width = event.target.value;
+                            const resolutionPreset = syncResolutionPreset(width, current.height);
+                            return { ...current, width, resolutionPreset };
+                          })}
+                        />
+                      </label>
+                      <label>
+                        Width
+                        <input
+                          inputMode="numeric"
+                          value={androidForm.height}
+                          onChange={(event) => setAndroidForm((current) => {
+                            const height = event.target.value;
+                            const resolutionPreset = syncResolutionPreset(current.width, height);
+                            return { ...current, height, resolutionPreset };
+                          })}
+                        />
+                      </label>
+                      <label>
+                        DPI
+                        <input
+                          inputMode="numeric"
+                          value={androidForm.dpi}
+                          onChange={(event) => setAndroidForm((current) => {
+                            const dpi = event.target.value;
+                            return { ...current, dpi };
+                          })}
+                        />
+                      </label>
+                    </div>
+                  </fieldset>
+                </>
+              )}
+              {isDirectAndroidForm && (
+                <>
+                  <label>
+                    Host
+                    <input
+                      value={androidForm.adbHost}
+                      onChange={(event) => setAndroidForm({ ...androidForm, adbHost: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Connect Port
+                    <input
+                      inputMode="numeric"
+                      value={androidForm.adbPort}
+                      onChange={(event) => setAndroidForm({ ...androidForm, adbPort: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Pair Port (Optional)
+                    <input
+                      inputMode="numeric"
+                      value={androidForm.pairPort}
+                      onChange={(event) => setAndroidForm({ ...androidForm, pairPort: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Pair Code (Optional)
+                    <input
+                      value={androidForm.pairCode}
+                      onChange={(event) => {
+                        setAndroidForm({ ...androidForm, pairCode: event.target.value });
+                      }}
+                    />
+                  </label>
+                  <div className="form-actions">
+                    <button type="submit">
+                      {editingAndroidId == null ? 'Create Android' : 'Update Android'}
+                    </button>
+                    {editingAndroidId != null && <button type="button" onClick={resetAndroidForm}>Cancel</button>}
+                  </div>
+                </>
+              )}
             </div>
           </form>
           <DataTable
@@ -1074,7 +1167,110 @@ function formatAndroidResolution(android: Pick<Android, 'width' | 'height' | 'dp
   const width = android.width ?? '?';
   const height = android.height ?? '?';
   const dpi = android.dpi ?? '?';
-  return `${width}x${height}@${dpi}`;
+  const isPortrait = typeof android.width === 'number' && typeof android.height === 'number' && android.height > android.width;
+  return isPortrait ? `${height}x${width}@${dpi}` : `${width}x${height}@${dpi}`;
+}
+
+function createAndroidFormState(redroidImages: RedroidImageOption[], type: 'REDROID' | 'DIRECT' = 'REDROID'): AndroidFormState {
+  const isRedroid = type === 'REDROID';
+  return {
+    type,
+    dockerId: '',
+    name: generateAndroidName(),
+    image: isRedroid ? defaultRedroidImage(redroidImages) : '',
+    accelerationMode: 'AUTO',
+    width: '',
+    height: '',
+    dpi: '',
+    resolutionPreset: 'custom',
+    adbHost: '',
+    adbPort: '',
+    pairPort: '',
+    pairCode: '',
+  };
+}
+
+function findResolutionPreset(width: string, height: string) {
+  const parsedWidth = parseOptionalInteger(width);
+  const parsedHeight = parseOptionalInteger(height);
+  if (parsedWidth == null || parsedHeight == null) {
+    return null;
+  }
+  return REDROID_RESOLUTION_PRESETS.find((preset) => (
+    preset.width === parsedWidth
+    && preset.height === parsedHeight
+  )) || null;
+}
+
+function generateAndroidName() {
+  const adjectives = [
+    'amber',
+    'brisk',
+    'calm',
+    'dapper',
+    'eager',
+    'frosty',
+    'gentle',
+    'hollow',
+    'ivory',
+    'jolly',
+    'kind',
+    'lively',
+    'mellow',
+    'noble',
+    'ocean',
+    'plucky',
+    'quiet',
+    'radiant',
+    'shady',
+    'tidy',
+    'upbeat',
+    'vivid',
+    'wavy',
+    'zesty',
+  ];
+  const nouns = [
+    'branch',
+    'canyon',
+    'drift',
+    'ember',
+    'forest',
+    'garden',
+    'harbor',
+    'island',
+    'junction',
+    'kernel',
+    'lantern',
+    'meadow',
+    'nest',
+    'orchard',
+    'pebble',
+    'quartz',
+    'river',
+    'summit',
+    'trail',
+    'valley',
+    'window',
+    'yard',
+    'zenith',
+  ];
+  return `${randomWord(adjectives)}-${randomWord(nouns)}`;
+}
+
+function randomWord(words: string[]) {
+  return words[randomIndex(words.length)];
+}
+
+function randomIndex(max: number) {
+  if (max <= 0) {
+    return 0;
+  }
+  if (window.crypto?.getRandomValues) {
+    const buffer = new Uint32Array(1);
+    window.crypto.getRandomValues(buffer);
+    return buffer[0] % max;
+  }
+  return Math.floor(Math.random() * max);
 }
 
 function formatJsonList(value?: string) {
@@ -1099,6 +1295,19 @@ function formatTaskLogDuration(taskLog: Pick<TaskLog, 'startedAt' | 'endedAt'>) 
   const endedAt = taskLog.endedAt ?? Date.now();
   const durationSeconds = Math.max(0, (endedAt - taskLog.startedAt) / 1000);
   return `${durationSeconds.toFixed(1)}s`;
+}
+
+function tabFromLocationPath(): Tab {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  const value = parts[parts.length - 1];
+  if (value === 'ollama' || value === 'docker' || value === 'android' || value === 'logs') {
+    return value;
+  }
+  return 'ollama';
+}
+
+function tabToPath(tab: Tab) {
+  return `/${tab}${window.location.search}`;
 }
 
 function redroidLifecycleAction(android: Android, status?: string) {
