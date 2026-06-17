@@ -33,6 +33,8 @@ public class SecurityConfig {
                     "/index.html",
                     "/auth/**",
                     "/health",
+                    "/ws",
+                    "/ws/**",
                     "/assets/**",
                     "/*.js",
                     "/*.css",

@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { clearStoredAuthTokens, deleteResource, exchangeAuthCode, getBlob, getJson, sendFormData, sendJson, setStoredAuthTokens } from './api';
+import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
+import { clearStoredAuthTokens, deleteResource, exchangeAuthCode, getBlob, getJson, getStoredAccessToken, sendFormData, sendJson, setStoredAuthTokens } from './api';
 
-type Tab = 'ollama' | 'docker' | 'android' | 'artifacts' | 'logs';
-type HealthTab = Exclude<Tab, 'logs' | 'artifacts'>;
+type Tab = 'ollama' | 'docker' | 'android' | 'artifacts' | 'tests' | 'logs';
+type HealthTab = Exclude<Tab, 'logs' | 'artifacts' | 'tests'>;
 type ArtifactFilter = 'all' | 'upload' | 'artifact';
 type ArtifactSource = 'UPLOAD' | 'ARTIFACT';
 
@@ -98,6 +99,55 @@ type TaskLog = {
   endedAt?: number;
 };
 
+type AndroidTestDetail = {
+  id: number;
+  status: string;
+  content: string;
+  result?: string | null;
+  startedAt?: number | null;
+  endedAt?: number | null;
+  request?: Record<string, unknown> | null;
+  summary?: Record<string, unknown> | null;
+  stepCount: number;
+};
+
+type AndroidTestStepHistory = {
+  id: number;
+  taskLogId: number;
+  stepNumber: number;
+  startedAt?: number | null;
+  endedAt?: number | null;
+  foreground?: string | null;
+  uiHash?: string | null;
+  uiContext?: string | null;
+  visionProvider?: string | null;
+  visionText?: string | null;
+  action?: string | null;
+  state?: string | null;
+  targetX?: number | null;
+  targetY?: number | null;
+  swipeX1?: number | null;
+  swipeY1?: number | null;
+  swipeX2?: number | null;
+  swipeY2?: number | null;
+  swipeDurationMs?: number | null;
+  inputText?: string | null;
+  reasoning?: string | null;
+  decisionJson?: string | null;
+  actionResult?: string | null;
+  error?: string | null;
+  imageStorageKey?: string | null;
+};
+
+type TaskProgressEvent = {
+  taskLogId?: number | null;
+  taskType?: string | null;
+  eventType: string;
+  emittedAt?: number | null;
+  taskLog?: TaskLog | null;
+  step?: AndroidTestStepHistory | null;
+};
+
 type OllamaModel = {
   name: string;
   model: string;
@@ -142,11 +192,19 @@ type ArtifactUploadFormState = {
   file: File | null;
 };
 
-type ArtifactAndroidSelectionState = {
+type AndroidDeviceSelectionState = {
   query: string;
   open: boolean;
   androidId: number | null;
   searchActive: boolean;
+};
+
+type AndroidTestFormState = {
+  androidId: string;
+  artifactId: string;
+  ollamaId: string;
+  objective: string;
+  maxSteps: string;
 };
 
 const REDROID_IMAGE_FALLBACK = 'redroid/redroid:16.0.0-latest';
@@ -176,7 +234,13 @@ export function App() {
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [redroidImages, setRedroidImages] = useState<RedroidImageOption[]>([]);
   const [artifactFilter, setArtifactFilter] = useState<ArtifactFilter>('all');
-  const [artifactAndroidSelection, setArtifactAndroidSelection] = useState<ArtifactAndroidSelectionState>({
+  const [artifactAndroidSelection, setArtifactAndroidSelection] = useState<AndroidDeviceSelectionState>({
+    query: '',
+    open: false,
+    androidId: null,
+    searchActive: false,
+  });
+  const [testAndroidSelection, setTestAndroidSelection] = useState<AndroidDeviceSelectionState>({
     query: '',
     open: false,
     androidId: null,
@@ -185,6 +249,13 @@ export function App() {
   const [artifactUploadForm, setArtifactUploadForm] = useState<ArtifactUploadFormState>({
     name: '',
     file: null,
+  });
+  const [androidTestForm, setAndroidTestForm] = useState<AndroidTestFormState>({
+    androidId: '',
+    artifactId: '',
+    ollamaId: '',
+    objective: '',
+    maxSteps: '20',
   });
   const [lastHealthChecks, setLastHealthChecks] = useState<Record<HealthTab, Record<number, number>>>({
     ollama: {},
@@ -197,11 +268,23 @@ export function App() {
     android: {},
   });
   const [selectedAndroidDetail, setSelectedAndroidDetail] = useState<AndroidDetail | null>(null);
+  const [selectedAndroidTestDetail, setSelectedAndroidTestDetail] = useState<AndroidTestDetail | null>(null);
+  const [androidTestSteps, setAndroidTestSteps] = useState<AndroidTestStepHistory[]>([]);
+  const [androidTestStepImageUrls, setAndroidTestStepImageUrls] = useState<Record<number, string>>({});
   const [status, setStatus] = useState('Idle');
   const ollamaRef = useRef<Ollama[]>([]);
   const dockerRef = useRef<Docker[]>([]);
   const androidRef = useRef<Android[]>([]);
+  const logsRef = useRef<TaskLog[]>([]);
+  const androidTestStepsRef = useRef<AndroidTestStepHistory[]>([]);
+  const selectedAndroidTestDetailRef = useRef<AndroidTestDetail | null>(null);
   const artifactUploadFormRef = useRef<HTMLFormElement | null>(null);
+  const androidTestStepImageUrlsRef = useRef<Record<number, string>>({});
+  const websocketClientRef = useRef<Client | null>(null);
+  const websocketTaskLogsSubscriptionRef = useRef<StompSubscription | null>(null);
+  const websocketTestDetailSubscriptionRef = useRef<StompSubscription | null>(null);
+  const websocketHasConnectedRef = useRef(false);
+  const tabRef = useRef<Tab>(tab);
 
   const [editingOllamaId, setEditingOllamaId] = useState<number | null>(null);
   const [editingDockerId, setEditingDockerId] = useState<number | null>(null);
@@ -246,13 +329,102 @@ export function App() {
     }
     loadTab(tab)
       .then(() => {
-        if (tab !== 'logs' && tab !== 'artifacts') {
+        if (tab !== 'logs' && tab !== 'artifacts' && tab !== 'tests') {
           return refreshTabHealth(tab as HealthTab);
+        }
+        if (tab === 'tests') {
+          return refreshTabHealth('android');
         }
         return undefined;
       })
       .catch((error) => setStatus(message(error)));
   }, [tab, authLoading]);
+
+  useEffect(() => {
+    selectedAndroidTestDetailRef.current = selectedAndroidTestDetail;
+  }, [selectedAndroidTestDetail]);
+
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    const token = getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+
+    const client = new Client({
+      brokerURL: websocketBrokerUrl(),
+      connectHeaders: {
+        Authorization: `Bearer ${token}`,
+      },
+      reconnectDelay: 5_000,
+      heartbeatIncoming: 10_000,
+      heartbeatOutgoing: 10_000,
+    });
+
+    const syncSubscriptions = () => {
+      websocketTaskLogsSubscriptionRef.current?.unsubscribe();
+      websocketTaskLogsSubscriptionRef.current = client.subscribe('/topic/task-logs', handleTaskProgressMessage);
+
+      websocketTestDetailSubscriptionRef.current?.unsubscribe();
+      const selectedId = selectedAndroidTestDetailRef.current?.id;
+      if (tabRef.current === 'tests' && selectedId != null) {
+        websocketTestDetailSubscriptionRef.current = client.subscribe(`/topic/android-tests/${selectedId}`, handleTaskProgressMessage);
+      } else {
+        websocketTestDetailSubscriptionRef.current = null;
+      }
+    };
+
+    client.onConnect = () => {
+      syncSubscriptions();
+      if (websocketHasConnectedRef.current) {
+        void refreshVisibleDataAfterReconnect();
+      } else {
+        websocketHasConnectedRef.current = true;
+      }
+    };
+
+    client.onWebSocketClose = () => {
+      websocketTaskLogsSubscriptionRef.current = null;
+      websocketTestDetailSubscriptionRef.current = null;
+    };
+
+    client.onStompError = (frame) => {
+      setStatus(frame.body || 'WebSocket error');
+    };
+
+    websocketClientRef.current = client;
+    websocketHasConnectedRef.current = false;
+    client.activate();
+
+    return () => {
+      websocketTaskLogsSubscriptionRef.current?.unsubscribe();
+      websocketTaskLogsSubscriptionRef.current = null;
+      websocketTestDetailSubscriptionRef.current?.unsubscribe();
+      websocketTestDetailSubscriptionRef.current = null;
+      websocketClientRef.current?.deactivate();
+      websocketClientRef.current = null;
+    };
+  }, [authLoading]);
+
+  useEffect(() => {
+    const client = websocketClientRef.current;
+    if (!client || !client.connected) {
+      return;
+    }
+    websocketTestDetailSubscriptionRef.current?.unsubscribe();
+    const selectedId = selectedAndroidTestDetail?.id;
+    if (tab === 'tests' && selectedId != null) {
+      websocketTestDetailSubscriptionRef.current = client.subscribe(`/topic/android-tests/${selectedId}`, handleTaskProgressMessage);
+      return;
+    }
+    websocketTestDetailSubscriptionRef.current = null;
+  }, [selectedAndroidTestDetail?.id, tab]);
 
   useEffect(() => {
     if (authLoading || tab !== 'artifacts') {
@@ -274,10 +446,24 @@ export function App() {
   }, [android]);
 
   useEffect(() => {
-    if (tab !== 'artifacts' || android.length === 0) {
+    logsRef.current = logs;
+  }, [logs]);
+
+  useEffect(() => {
+    androidTestStepsRef.current = androidTestSteps;
+  }, [androidTestSteps]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(androidTestStepImageUrlsRef.current).forEach((url) => window.URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  useEffect(() => {
+    if ((tab !== 'artifacts' && tab !== 'tests') || android.length === 0) {
       return;
     }
-    setArtifactAndroidSelection((current) => {
+    const syncSelection = (current: AndroidDeviceSelectionState) => {
       const selected = android.find((row) => row.id === current.androidId) || null;
       if (selected) {
         const nextQuery = current.searchActive ? current.query : artifactAndroidLabel(selected, healthStatuses.android);
@@ -301,7 +487,16 @@ export function App() {
         query: artifactAndroidLabel(next, healthStatuses.android),
         searchActive: false,
       };
-    });
+    };
+    if (tab === 'artifacts') {
+      setArtifactAndroidSelection(syncSelection);
+    } else {
+      setTestAndroidSelection((current) => {
+        const next = syncSelection(current);
+        setAndroidTestForm((form) => ({ ...form, androidId: next.androidId == null ? '' : String(next.androidId) }));
+        return next;
+      });
+    }
   }, [android, healthStatuses.android, tab]);
 
   useEffect(() => {
@@ -315,15 +510,7 @@ export function App() {
       }, 5_000);
       return () => window.clearInterval(timer);
     }
-    const timer = window.setInterval(() => {
-      if (tab === 'logs') {
-        loadLogs().catch((error) => setStatus(message(error)));
-        return;
-      }
-      refreshTabHealth(tab)
-        .catch((error) => setStatus(message(error)));
-    }, 5_000);
-    return () => window.clearInterval(timer);
+    return undefined;
   }, [tab, authLoading]);
 
   async function bootstrap() {
@@ -358,15 +545,15 @@ export function App() {
     } else if (nextTab === 'artifacts') {
       await Promise.all([loadAndroid(), loadArtifacts()]);
       await refreshTabHealth('android');
+    } else if (nextTab === 'tests') {
+      await Promise.all([loadAndroid(), loadArtifacts('all'), loadOllama(), loadLogs()]);
+      await refreshTabHealth('android');
     } else {
       await loadLogs();
     }
   }
 
-  async function refreshTabHealth(nextTab: Tab) {
-    if (nextTab === 'logs') {
-      return;
-    }
+  async function refreshTabHealth(nextTab: HealthTab) {
     const rows = rowsForHealthTab(nextTab);
     if (rows.length === 0) {
       return;
@@ -399,8 +586,11 @@ export function App() {
     return rows;
   }
 
-  async function loadLogs() {
-    setLogs(await getJson<TaskLog[]>('/api/task-logs'));
+  async function loadLogs(init: RequestInit = {}) {
+    const rows = await getJson<TaskLog[]>('/api/task-logs', init);
+    logsRef.current = rows;
+    setLogs(rows);
+    return rows;
   }
 
   async function loadArtifacts(source: ArtifactFilter = artifactFilter) {
@@ -461,6 +651,44 @@ export function App() {
     }
     const taskLog = await sendJson<TaskLog>(`/api/artifacts/${row.id}/install`, 'POST', { androidId: target.id });
     setStatus(`Queued install task #${taskLog.id} for ${row.name}`);
+  }
+
+  async function submitAndroidTest(event: FormEvent) {
+    event.preventDefault();
+    const androidId = Number(testAndroidSelection.androidId || androidTestForm.androidId || pickDefaultArtifactAndroid(android, healthStatuses.android)?.id);
+    const artifactId = Number(androidTestForm.artifactId || artifacts[0]?.id);
+    const ollamaId = Number(androidTestForm.ollamaId || ollama[0]?.id);
+    const maxSteps = parseOptionalInteger(androidTestForm.maxSteps) ?? 20;
+    if (!androidId || Number.isNaN(androidId)) {
+      setStatus('Select an Android device');
+      return;
+    }
+    const selectedAndroid = android.find((row) => row.id === androidId);
+    if (!selectedAndroid || !isArtifactAndroidActive(selectedAndroid, healthStatuses.android)) {
+      setStatus('Select an active Android device');
+      return;
+    }
+    if (!artifactId || Number.isNaN(artifactId)) {
+      setStatus('Select an APK artifact');
+      return;
+    }
+    if (!ollamaId || Number.isNaN(ollamaId)) {
+      setStatus('Select an Ollama connection');
+      return;
+    }
+    if (!androidTestForm.objective.trim()) {
+      setStatus('Objective is required');
+      return;
+    }
+    const taskLog = await sendJson<TaskLog>('/api/tests/android', 'POST', {
+      androidId,
+      artifactId,
+      ollamaId,
+      objective: androidTestForm.objective.trim(),
+      maxSteps,
+    });
+    setStatus(`Queued Android test task #${taskLog.id}`);
+    await loadLogs();
   }
 
   function markHealthChecked(nextTab: HealthTab, checks: HealthResponse[]) {
@@ -711,6 +939,156 @@ export function App() {
     setSelectedAndroidDetail(detail);
   }
 
+  async function loadAndroidTestDetail(id: number, init: RequestInit = {}) {
+    const [detail, steps] = await Promise.all([
+      getJson<AndroidTestDetail>(`/api/tests/android/${id}`, init),
+      getJson<AndroidTestStepHistory[]>(`/api/tests/android/${id}/steps`, init),
+    ]);
+    setSelectedAndroidTestDetail(detail);
+    setAndroidTestSteps(steps);
+    await loadAndroidTestStepImages(id, steps, init);
+    setStatus(`Loaded Android test #${id}`);
+    return detail;
+  }
+
+  async function loadAndroidTestStepImages(taskLogId: number, steps: AndroidTestStepHistory[], init: RequestInit = {}) {
+    Object.values(androidTestStepImageUrlsRef.current).forEach((url) => window.URL.revokeObjectURL(url));
+    const urls: Record<number, string> = {};
+    await Promise.all(steps.map(async (step) => {
+      if (!step.imageStorageKey) {
+        return;
+      }
+      const blob = await getBlob(`/api/tests/android/${taskLogId}/steps/${step.stepNumber}/image`, init);
+      urls[step.stepNumber] = window.URL.createObjectURL(blob);
+    }));
+    androidTestStepImageUrlsRef.current = urls;
+    setAndroidTestStepImageUrls(urls);
+  }
+
+  async function refreshVisibleDataAfterReconnect() {
+    if (tab === 'logs' || tab === 'tests') {
+      await loadLogs();
+    }
+    if (tab === 'tests' && selectedAndroidTestDetailRef.current) {
+      await loadAndroidTestDetail(selectedAndroidTestDetailRef.current.id);
+    }
+  }
+
+  function handleTaskProgressMessage(frame: IMessage) {
+    try {
+      const event = JSON.parse(frame.body) as TaskProgressEvent;
+      applyTaskProgressEvent(event);
+    } catch (error) {
+      setStatus(message(error));
+    }
+  }
+
+  function applyTaskProgressEvent(event: TaskProgressEvent) {
+    if (!event) {
+      return;
+    }
+    if (event.eventType === 'TASK_LOGS_CLEARED') {
+      Object.values(androidTestStepImageUrlsRef.current).forEach((url) => window.URL.revokeObjectURL(url));
+      androidTestStepImageUrlsRef.current = {};
+      setLogs([]);
+      setSelectedAndroidTestDetail(null);
+      setAndroidTestSteps([]);
+      setAndroidTestStepImageUrls({});
+      return;
+    }
+
+    if (event.taskLog) {
+      setLogs((current) => upsertTaskLog(current, event.taskLog as TaskLog));
+      if (selectedAndroidTestDetailRef.current && selectedAndroidTestDetailRef.current.id === event.taskLog.id) {
+        if (event.taskLog.status === 'QUEUED' && !event.taskLog.result) {
+          Object.values(androidTestStepImageUrlsRef.current).forEach((url) => window.URL.revokeObjectURL(url));
+          androidTestStepImageUrlsRef.current = {};
+          androidTestStepsRef.current = [];
+          setAndroidTestSteps([]);
+          setAndroidTestStepImageUrls({});
+        }
+        setSelectedAndroidTestDetail((current) => updateAndroidTestDetailFromTaskLog(current, event.taskLog as TaskLog));
+      }
+    }
+
+    if (event.step) {
+      const step = event.step;
+      if (selectedAndroidTestDetailRef.current && selectedAndroidTestDetailRef.current.id === step.taskLogId) {
+        const nextSteps = upsertAndroidTestStep(androidTestStepsRef.current, step);
+        androidTestStepsRef.current = nextSteps;
+        setAndroidTestSteps(nextSteps);
+        if (step.imageStorageKey) {
+          void loadAndroidTestStepImage(step.taskLogId, step.stepNumber).catch((error) => setStatus(message(error)));
+        }
+        setSelectedAndroidTestDetail((current) => current && current.id === step.taskLogId
+          ? { ...current, stepCount: nextSteps.length }
+          : current);
+      }
+    }
+  }
+
+  async function loadAndroidTestStepImage(taskLogId: number, stepNumber: number) {
+    const previous = androidTestStepImageUrlsRef.current[stepNumber];
+    if (previous) {
+      window.URL.revokeObjectURL(previous);
+    }
+    const blob = await getBlob(`/api/tests/android/${taskLogId}/steps/${stepNumber}/image`);
+    const url = window.URL.createObjectURL(blob);
+    androidTestStepImageUrlsRef.current = {
+      ...androidTestStepImageUrlsRef.current,
+      [stepNumber]: url,
+    };
+    setAndroidTestStepImageUrls(androidTestStepImageUrlsRef.current);
+  }
+
+  function upsertTaskLog(rows: TaskLog[], nextRow: TaskLog) {
+    const index = rows.findIndex((row) => row.id === nextRow.id);
+    if (index === -1) {
+      return [nextRow, ...rows].sort((left, right) => right.id - left.id);
+    }
+    const next = [...rows];
+    next[index] = nextRow;
+    return next;
+  }
+
+  function updateAndroidTestDetailFromTaskLog(current: AndroidTestDetail | null, nextRow: TaskLog) {
+    if (!current || current.id !== nextRow.id) {
+      return current;
+    }
+    return {
+      ...current,
+      status: nextRow.status,
+      content: nextRow.content,
+      result: nextRow.result ?? null,
+      startedAt: nextRow.startedAt ?? current.startedAt,
+      endedAt: nextRow.endedAt ?? current.endedAt,
+      request: parseJsonRecord(nextRow.content),
+      summary: parseJsonRecord(nextRow.result),
+    };
+  }
+
+  function upsertAndroidTestStep(rows: AndroidTestStepHistory[], nextStep: AndroidTestStepHistory) {
+    const index = rows.findIndex((row) => row.stepNumber === nextStep.stepNumber);
+    if (index === -1) {
+      return [...rows, nextStep].sort((left, right) => left.stepNumber - right.stepNumber);
+    }
+    const next = [...rows];
+    next[index] = nextStep;
+    return next;
+  }
+
+  function parseJsonRecord(value?: string | null) {
+    if (!value) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
   async function copyText(value: string, label?: string) {
     await navigator.clipboard.writeText(value);
     setStatus(`Copied ${label || 'value'}`);
@@ -738,11 +1116,22 @@ export function App() {
   const selectedArtifactAndroidStatus = selectedArtifactAndroidTarget
     ? artifactAndroidStatusLabel(selectedArtifactAndroidTarget, healthStatuses.android)
     : 'Pick device';
+  const selectedTestAndroidTarget = selectedArtifactAndroid(android, healthStatuses.android, testAndroidSelection.androidId);
+  const selectedTestAndroidReady = selectedTestAndroidTarget != null && isArtifactAndroidActive(selectedTestAndroidTarget, healthStatuses.android);
+  const selectedTestAndroidStatus = selectedTestAndroidTarget
+    ? artifactAndroidStatusLabel(selectedTestAndroidTarget, healthStatuses.android)
+    : 'Pick device';
   const artifactAndroidOptions = filterArtifactAndroidOptions(
     android,
     healthStatuses.android,
     artifactAndroidSelection.query,
     artifactAndroidSelection.searchActive,
+  );
+  const testAndroidOptions = filterArtifactAndroidOptions(
+    android,
+    healthStatuses.android,
+    testAndroidSelection.query,
+    testAndroidSelection.searchActive,
   );
   return (
     <main className="app-shell">
@@ -763,7 +1152,7 @@ export function App() {
       </header>
 
       <nav className="tabs" aria-label="Connection manager sections">
-        {(['ollama', 'docker', 'android', 'artifacts', 'logs'] as Tab[]).map((item) => (
+        {(['ollama', 'docker', 'android', 'artifacts', 'tests', 'logs'] as Tab[]).map((item) => (
           <button
             key={item}
             className={tab === item ? 'active' : ''}
@@ -1166,7 +1555,7 @@ export function App() {
       {tab === 'artifacts' && (
         <section className="panel artifacts-panel">
           <div className="artifact-toolbar">
-            <label className="artifact-card artifact-filter-card artifact-toolbar-field artifact-filter">
+            <label className="artifact-toolbar-field artifact-filter">
               <span>Source</span>
               <select value={artifactFilter} onChange={(event) => setArtifactFilter(event.target.value as ArtifactFilter)}>
                 <option value="all">All</option>
@@ -1174,7 +1563,7 @@ export function App() {
                 <option value="artifact">Artifact</option>
               </select>
             </label>
-            <div className="artifact-card artifact-device-card artifact-toolbar-field artifact-device-picker">
+            <div className="artifact-toolbar-field artifact-device-picker">
               <div className="artifact-toolbar-label-row">
                 <span>Android device</span>
                 <span className={`artifact-device-badge ${selectedArtifactAndroidReady ? 'is-active' : 'is-empty'}`}>
@@ -1237,10 +1626,7 @@ export function App() {
                           });
                         }}
                       >
-                        <span className="artifact-combobox-option-title">{artifactAndroidLabel(option, healthStatuses.android)}</span>
-                        <span className={`artifact-combobox-option-status ${isActive ? 'is-active' : 'is-inactive'}`}>
-                          {artifactAndroidStatusLabel(option, healthStatuses.android)}
-                        </span>
+                        {renderAndroidDeviceOptionCard(option, healthStatuses.android, redroidImages, isActive)}
                       </button>
                     );
                   })
@@ -1249,7 +1635,7 @@ export function App() {
             </div>
             <form
               ref={artifactUploadFormRef}
-              className="artifact-card artifact-upload-card artifact-upload-inline"
+              className="artifact-upload-inline"
               onSubmit={(event) => submitArtifactUpload(event).catch((error) => setStatus(message(error)))}
             >
               <label className="artifact-toolbar-field">
@@ -1333,6 +1719,265 @@ export function App() {
               return undefined;
             }}
           />
+        </section>
+      )}
+
+      {tab === 'tests' && (
+        <section className="panel">
+          <form className="form-shell" onSubmit={(event) => submitAndroidTest(event).catch((error) => setStatus(message(error)))}>
+            <div className="form-fields form-grid test-form-grid">
+              <div className="artifact-toolbar-field artifact-device-picker test-device-picker">
+                <div className="artifact-toolbar-label-row">
+                  <span>Android device</span>
+                  <span className={`artifact-device-badge ${selectedTestAndroidReady ? 'is-active' : 'is-empty'}`}>
+                    {selectedTestAndroidStatus}
+                  </span>
+                </div>
+                <div className="artifact-combobox">
+                  <input
+                    value={testAndroidSelection.query}
+                    placeholder="Search Android device"
+                    onFocus={() => setTestAndroidSelection((current) => ({ ...current, open: true }))}
+                    onBlur={() => window.setTimeout(() => {
+                      setTestAndroidSelection((current) => {
+                        const next = selectedArtifactAndroid(android, healthStatuses.android, current.androidId);
+                        if (!next) {
+                          setAndroidTestForm((form) => ({ ...form, androidId: '' }));
+                          return {
+                            ...current,
+                            androidId: null,
+                            query: '',
+                            open: false,
+                            searchActive: false,
+                          };
+                        }
+                        setAndroidTestForm((form) => ({ ...form, androidId: String(next.id) }));
+                        return {
+                          ...current,
+                          androidId: next.id,
+                          query: artifactAndroidLabel(next, healthStatuses.android),
+                          open: false,
+                          searchActive: false,
+                        };
+                      });
+                    }, 120)}
+                    onChange={(event) => setTestAndroidSelection((current) => ({
+                      ...current,
+                      query: event.target.value,
+                      open: true,
+                      searchActive: true,
+                    }))}
+                  />
+                </div>
+                <div className={`artifact-combobox-menu ${testAndroidSelection.open ? 'is-open' : ''}`}>
+                  {testAndroidOptions.length === 0 ? (
+                    <p className="artifact-combobox-empty">No matching Android devices.</p>
+                  ) : (
+                    testAndroidOptions.map((option) => {
+                      const isSelected = option.id === testAndroidSelection.androidId;
+                      const isActive = isArtifactAndroidActive(option, healthStatuses.android);
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`artifact-combobox-option ${isSelected ? 'is-selected' : ''}`}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            setTestAndroidSelection({
+                              androidId: option.id,
+                              query: artifactAndroidLabel(option, healthStatuses.android),
+                              open: false,
+                              searchActive: false,
+                            });
+                            setAndroidTestForm((current) => ({ ...current, androidId: String(option.id) }));
+                          }}
+                        >
+                          {renderAndroidDeviceOptionCard(option, healthStatuses.android, redroidImages, isActive)}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              <label>
+                APK artifact
+                <select
+                  value={androidTestForm.artifactId || artifacts[0]?.id || ''}
+                  onChange={(event) => setAndroidTestForm((current) => ({ ...current, artifactId: event.target.value }))}
+                >
+                  <option value="">Select artifact</option>
+                  {artifacts.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Ollama
+                <select
+                  value={androidTestForm.ollamaId || ollama[0]?.id || ''}
+                  onChange={(event) => setAndroidTestForm((current) => ({ ...current, ollamaId: event.target.value }))}
+                >
+                  <option value="">Select Ollama</option>
+                  {ollama.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {item.model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Max steps
+                <input
+                  inputMode="numeric"
+                  value={androidTestForm.maxSteps}
+                  onChange={(event) => setAndroidTestForm((current) => ({ ...current, maxSteps: event.target.value }))}
+                />
+              </label>
+              <label className="span-all">
+                Objective
+                <input
+                  value={androidTestForm.objective}
+                  onChange={(event) => setAndroidTestForm((current) => ({ ...current, objective: event.target.value }))}
+                  placeholder="Open the app and verify the login screen appears"
+                />
+              </label>
+              <div className="form-actions span-all">
+                <button type="submit">Run Android test</button>
+              </div>
+            </div>
+          </form>
+          <DataTable
+            rows={logs.filter((row) => row.type === 'ANDROID_AUTONOMOUS_TEST')}
+            columns={['id', 'status', 'duration', 'content', 'result']}
+            columnLabels={{
+              id: 'ID',
+              status: 'Status',
+              duration: 'Duration',
+              content: 'Request',
+              result: 'Result',
+            }}
+            renderActions={(row) => {
+              const taskLog = row as TaskLog;
+              return (
+                <>
+                  <button type="button" onClick={() => loadAndroidTestDetail(taskLog.id).catch((error) => setStatus(message(error)))}>
+                    Detail
+                  </button>
+                </>
+              );
+            }}
+            renderCell={(row, column) => {
+              if (column === 'status') {
+                const value = (row as TaskLog).status;
+                return <span className={`log-status ${taskStatusClass(value)}`}>{value}</span>;
+              }
+              if (column === 'duration') {
+                return formatTaskLogDuration(row as TaskLog);
+              }
+              if (column === 'content' || column === 'result') {
+                const value = (row as TaskLog)[column as 'content' | 'result'];
+                return value ? (
+                  <button type="button" className="text-button copy-cell ellipsis-cell" onClick={() => copyText(value, column).catch((error) => setStatus(message(error)))}>
+                    {value}
+                  </button>
+                ) : (
+                  '-'
+                );
+              }
+              return undefined;
+            }}
+          />
+          {selectedAndroidTestDetail && (
+            <div className="test-detail-shell">
+              <div className="detail-grid">
+                <div>
+                  <span>Test</span>
+                  <strong>#{selectedAndroidTestDetail.id}</strong>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>{selectedAndroidTestDetail.status}</strong>
+                </div>
+                <div>
+                  <span>Duration</span>
+                  <strong>{formatTaskLogDuration(selectedAndroidTestDetail)}</strong>
+                </div>
+                <div>
+                  <span>Steps</span>
+                  <strong>{selectedAndroidTestDetail.stepCount}</strong>
+                </div>
+                <div>
+                  <span>Package</span>
+                  <strong>{summaryValue(selectedAndroidTestDetail.summary, 'packageName')}</strong>
+                </div>
+                <div>
+                  <span>Serial</span>
+                  <strong>{summaryValue(selectedAndroidTestDetail.summary, 'serial')}</strong>
+                </div>
+                <div>
+                  <span>Reason</span>
+                  <strong>{summaryValue(selectedAndroidTestDetail.summary, 'reason')}</strong>
+                </div>
+              </div>
+              <div className="test-objective">
+                <span>Objective</span>
+                <strong>{summaryValue(selectedAndroidTestDetail.request, 'objective')}</strong>
+              </div>
+              <div className="test-step-list">
+                {androidTestSteps.map((step) => (
+                  <div key={step.id} className="test-step-card">
+                    <div className="test-step-media">
+                      {androidTestStepImageUrls[step.stepNumber] ? (
+                        <img
+                          className="test-step-image"
+                          src={androidTestStepImageUrls[step.stepNumber]}
+                          alt={`Step ${step.stepNumber}`}
+                        />
+                      ) : (
+                        <div className="test-step-image-empty">No screenshot</div>
+                      )}
+                    </div>
+                    <div className="test-step-fields">
+                      <div className="detail-grid">
+                        <div>
+                          <span>Step</span>
+                          <strong>{step.stepNumber}</strong>
+                        </div>
+                        <div>
+                          <span>Timing</span>
+                          <strong>{formatStepDuration(step)}</strong>
+                        </div>
+                        <div>
+                          <span>Action</span>
+                          <strong>{step.action || '-'}</strong>
+                        </div>
+                        <div>
+                          <span>Target</span>
+                          <strong>{formatTarget(step)}</strong>
+                        </div>
+                        <div>
+                          <span>Swipe</span>
+                          <strong>{formatSwipe(step)}</strong>
+                        </div>
+                        <div>
+                          <span>Foreground</span>
+                          <strong>{step.foreground || '-'}</strong>
+                        </div>
+                      </div>
+                      <TestStepBlock title="Reasoning" value={step.reasoning} />
+                      <TestStepBlock title="UI context" value={step.uiContext} />
+                      <TestStepBlock title="Vision" value={step.visionText} />
+                      <TestStepBlock title="Decision JSON" value={step.decisionJson} />
+                      <TestStepBlock title="Action result" value={step.actionResult} />
+                      <TestStepBlock title="Error" value={step.error} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -1472,6 +2117,18 @@ function DataTable<T extends { id: number }>({
   );
 }
 
+function TestStepBlock({ title, value }: { title: string; value?: string | null }) {
+  if (!value) {
+    return null;
+  }
+  return (
+    <div className="test-step-block">
+      <span>{title}</span>
+      <pre>{value}</pre>
+    </div>
+  );
+}
+
 function cellValue(row: Record<string, unknown>, column: string) {
   const value = row[column];
   if (value === undefined || value === null || value === '') {
@@ -1485,6 +2142,27 @@ function cellValue(row: Record<string, unknown>, column: string) {
   }
   const text = String(value);
   return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+}
+
+function summaryValue(source: Record<string, unknown> | null | undefined, key: string) {
+  const value = source?.[key];
+  if (value === undefined || value === null || value === '') {
+    return '-';
+  }
+  return String(value);
+}
+
+function hasActiveTaskLogs(rows: TaskLog[]) {
+  return rows.some((row) => !isTerminalTaskStatus(row.status));
+}
+
+function isTerminalTaskStatus(status?: string | null) {
+  const normalized = (status || '').toUpperCase();
+  return normalized === 'SUCCESS' || normalized === 'FAILED' || normalized === 'CANCELLED';
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function formatAndroidAddress(android: Pick<Android, 'adbHost' | 'adbPort'>) {
@@ -1631,10 +2309,37 @@ function formatTaskLogDuration(taskLog: Pick<TaskLog, 'startedAt' | 'endedAt'>) 
   return `${durationSeconds.toFixed(1)}s`;
 }
 
+function formatStepDuration(step: Pick<AndroidTestStepHistory, 'startedAt' | 'endedAt'>) {
+  if (step.startedAt == null) {
+    return '-';
+  }
+  const endedAt = step.endedAt ?? Date.now();
+  return `${Math.max(0, (endedAt - step.startedAt) / 1000).toFixed(1)}s`;
+}
+
+function formatTarget(step: AndroidTestStepHistory) {
+  if (step.targetX == null || step.targetY == null) {
+    return '-';
+  }
+  return `${step.targetX},${step.targetY}`;
+}
+
+function formatSwipe(step: AndroidTestStepHistory) {
+  if (step.swipeX1 == null || step.swipeY1 == null || step.swipeX2 == null || step.swipeY2 == null) {
+    return '-';
+  }
+  const duration = step.swipeDurationMs == null ? '' : ` ${step.swipeDurationMs}ms`;
+  return `${step.swipeX1},${step.swipeY1} -> ${step.swipeX2},${step.swipeY2}${duration}`;
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
 function tabFromLocationPath(): Tab {
   const parts = window.location.pathname.split('/').filter(Boolean);
   const value = parts[parts.length - 1];
-  if (value === 'ollama' || value === 'docker' || value === 'android' || value === 'artifacts' || value === 'logs') {
+  if (value === 'ollama' || value === 'docker' || value === 'android' || value === 'artifacts' || value === 'tests' || value === 'logs') {
     return value;
   }
   return 'ollama';
@@ -1642,6 +2347,11 @@ function tabFromLocationPath(): Tab {
 
 function tabToPath(tab: Tab) {
   return `/${tab}${window.location.search}`;
+}
+
+function websocketBrokerUrl() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
 }
 
 function redroidLifecycleAction(android: Android, status?: string) {
@@ -1684,6 +2394,9 @@ function label(tab: Tab) {
   if (tab === 'artifacts') {
     return 'Artifacts';
   }
+  if (tab === 'tests') {
+    return 'Tests';
+  }
   return tab[0].toUpperCase() + tab.slice(1);
 }
 
@@ -1720,6 +2433,57 @@ function artifactAndroidLabel(android: Android, statuses: Record<number, string>
   const status = artifactAndroidStatusLabel(android, statuses);
   const name = android.name || `android-${android.id}`;
   return address ? `${name} · ${address} · ${status}` : `${name} · ${status}`;
+}
+
+function renderAndroidDeviceOptionCard(
+  android: Android,
+  statuses: Record<number, string>,
+  redroidImages: RedroidImageOption[],
+  isActive: boolean,
+) {
+  const status = artifactAndroidStatusLabel(android, statuses);
+  return (
+    <span className="android-device-card">
+      <span className="android-device-card-top">
+        <span className="android-device-card-name">{android.name || `android-${android.id}`}</span>
+        <span className={`artifact-combobox-option-status ${isActive ? 'is-active' : 'is-inactive'}`}>{status}</span>
+      </span>
+      <span className="android-device-card-grid">
+        <span>
+          <span>Android version</span>
+          <strong>{androidVersionLabel(android, redroidImages)}</strong>
+        </span>
+        <span>
+          <span>Address:port</span>
+          <strong>{formatAndroidAddress(android) || '-'}</strong>
+        </span>
+        <span>
+          <span>Name</span>
+          <strong>{android.name || `android-${android.id}`}</strong>
+        </span>
+        <span>
+          <span>Type</span>
+          <strong>{androidTypeLabel(android)}</strong>
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function androidVersionLabel(android: Android, redroidImages: RedroidImageOption[]) {
+  if (android.type === 'DIRECT') {
+    return '-';
+  }
+  const option = redroidImages.find((item) => item.value === android.image);
+  if (option) {
+    return option.label;
+  }
+  const version = android.image.match(/redroid:(\d+(?:\.\d+)?)/)?.[1];
+  return version ? `Android ${version.replace(/\.0$/, '')}` : android.image || '-';
+}
+
+function androidTypeLabel(android: Pick<Android, 'type'>) {
+  return android.type === 'DIRECT' ? 'Physical' : android.type.toLowerCase();
 }
 
 function artifactAndroidStatusLabel(android: Android, statuses: Record<number, string>) {

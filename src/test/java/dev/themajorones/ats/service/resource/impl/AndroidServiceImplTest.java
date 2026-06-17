@@ -21,6 +21,7 @@ import org.springframework.amqp.rabbit.core.RabbitOperations;
 import dev.themajorones.ats.repository.AndroidRepository;
 import dev.themajorones.ats.repository.TaskLogRepository;
 import dev.themajorones.ats.service.resource.DockerService;
+import dev.themajorones.ats.service.progress.TaskProgressBroadcaster;
 import dev.themajorones.models.client.AdbClient;
 import dev.themajorones.models.client.DockerClient;
 import dev.themajorones.models.constants.AndroidStatus;
@@ -44,6 +45,9 @@ class AndroidServiceImplTest {
     private TaskLogRepository taskLogRepository;
 
     @Mock
+    private TaskProgressBroadcaster taskProgressBroadcaster;
+
+    @Mock
     private DockerService dockerService;
 
     @Mock
@@ -63,6 +67,7 @@ class AndroidServiceImplTest {
         service = new AndroidServiceImpl(
             androidRepository,
             taskLogRepository,
+            taskProgressBroadcaster,
             dockerService,
             dockerClient,
             adbClient,
@@ -117,6 +122,7 @@ class AndroidServiceImplTest {
         assertThat(queuedRequest.getWidth()).isEqualTo(1080);
         assertThat(queuedRequest.getHeight()).isEqualTo(1920);
         assertThat(queuedRequest.getDpi()).isEqualTo(420);
+        verify(taskProgressBroadcaster).broadcastTaskLog(any(TaskLog.class), any());
     }
 
     @Test

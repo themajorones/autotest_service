@@ -28,6 +28,7 @@ import dev.themajorones.ats.service.artifact.ArtifactService;
 import dev.themajorones.ats.service.storage.ArtifactStorageClient;
 import dev.themajorones.ats.service.storage.ArtifactStorageObject;
 import dev.themajorones.ats.service.resource.AndroidService;
+import dev.themajorones.ats.service.progress.TaskProgressBroadcaster;
 import dev.themajorones.models.entity.Artifact;
 import dev.themajorones.models.entity.ArtifactSource;
 import dev.themajorones.models.entity.GitHubRepo;
@@ -35,6 +36,7 @@ import dev.themajorones.models.entity.GitHubUser;
 import dev.themajorones.models.entity.TaskLog;
 import dev.themajorones.models.constants.RabbitMqConstant;
 import dev.themajorones.models.constants.TaskLogConstant;
+import dev.themajorones.models.constants.TaskProgressConstant;
 import dev.themajorones.models.dto.InstallApkRequest;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
 import dev.themajorones.models.util.JsonUtils;
@@ -54,6 +56,7 @@ public class ArtifactServiceImpl implements ArtifactService {
     private final ArtifactStorageClient artifactStorageClient;
     private final GitHubApiClient gitHubApiClient;
     private final AndroidService androidService;
+    private final TaskProgressBroadcaster taskProgressBroadcaster;
     private final RabbitOperations rabbitOperations;
     private final ObjectMapper objectMapper;
 
@@ -64,6 +67,7 @@ public class ArtifactServiceImpl implements ArtifactService {
         ArtifactStorageClient artifactStorageClient,
         GitHubApiClient gitHubApiClient,
         AndroidService androidService,
+        TaskProgressBroadcaster taskProgressBroadcaster,
         RabbitOperations rabbitOperations,
         ObjectMapper objectMapper
     ) {
@@ -73,6 +77,7 @@ public class ArtifactServiceImpl implements ArtifactService {
         this.artifactStorageClient = artifactStorageClient;
         this.gitHubApiClient = gitHubApiClient;
         this.androidService = androidService;
+        this.taskProgressBroadcaster = taskProgressBroadcaster;
         this.rabbitOperations = rabbitOperations;
         this.objectMapper = objectMapper;
     }
@@ -221,7 +226,9 @@ public class ArtifactServiceImpl implements ArtifactService {
         );
 
         taskLog.setStatus(TaskLogConstant.Status.QUEUED);
-        return taskLogRepository.save(taskLog);
+        TaskLog saved = taskLogRepository.save(taskLog);
+        taskProgressBroadcaster.broadcastTaskLog(saved, TaskProgressConstant.EventType.TASK_LOG_UPSERTED);
+        return saved;
     }
 
     private byte[] downloadLegacyGithubArtifact(GitHubUser user, Artifact artifact) {

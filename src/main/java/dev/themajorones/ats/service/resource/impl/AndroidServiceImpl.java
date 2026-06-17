@@ -15,6 +15,7 @@ import dev.themajorones.ats.repository.AndroidRepository;
 import dev.themajorones.ats.repository.TaskLogRepository;
 import dev.themajorones.ats.service.resource.AndroidService;
 import dev.themajorones.ats.service.resource.DockerService;
+import dev.themajorones.ats.service.progress.TaskProgressBroadcaster;
 import dev.themajorones.models.client.AdbClient;
 import dev.themajorones.models.client.DockerClient;
 import dev.themajorones.models.constants.AndroidStatus;
@@ -22,6 +23,7 @@ import dev.themajorones.models.constants.AndroidType;
 import dev.themajorones.models.constants.RabbitMqConstant;
 import dev.themajorones.models.constants.RedroidImageConstant;
 import dev.themajorones.models.constants.TaskLogConstant;
+import dev.themajorones.models.constants.TaskProgressConstant;
 import dev.themajorones.models.dto.AdbCommandResult;
 import dev.themajorones.models.dto.AndroidDetail;
 import dev.themajorones.models.dto.CreateAndroidRequest;
@@ -47,6 +49,7 @@ public class AndroidServiceImpl implements AndroidService {
     private static final Duration PORT_CHECK_TIMEOUT = Duration.ofSeconds(2);
     private final AndroidRepository androidRepository;
     private final TaskLogRepository taskLogRepository;
+    private final TaskProgressBroadcaster taskProgressBroadcaster;
     private final DockerService dockerService;
     private final DockerClient dockerClient;
     private final AdbClient adbClient;
@@ -168,7 +171,8 @@ public class AndroidServiceImpl implements AndroidService {
             JsonUtils.writeJson(objectMapper, envelope, "Unable to serialize JSON")
         );
         taskLog.setStatus(TaskLogConstant.Status.QUEUED);
-        taskLogRepository.save(taskLog);
+        TaskLog saved = taskLogRepository.save(taskLog);
+        taskProgressBroadcaster.broadcastTaskLog(saved, TaskProgressConstant.EventType.TASK_LOG_UPSERTED);
 
         LOG.info("Queued Redroid Android creation taskLogId={} dockerId={}", taskLog.getId(), normalized.getDockerId());
         return Map.of(

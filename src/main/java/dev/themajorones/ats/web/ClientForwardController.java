@@ -6,7 +6,19 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class ClientForwardController {
 
-    @GetMapping("/{path:[^\\.]*}")
+    @GetMapping("/")
+    public String forwardRoot() {
+        return "forward:/index.html";
+    }
+
+    @GetMapping({
+        "/ollama",
+        "/docker",
+        "/android",
+        "/artifacts",
+        "/tests",
+        "/logs"
+    })
     public String forwardClientRoutes() {
         return "forward:/index.html";
     }

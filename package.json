@@ -14,6 +14,7 @@
     "webapp:preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@stomp/stompjs": "^7.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

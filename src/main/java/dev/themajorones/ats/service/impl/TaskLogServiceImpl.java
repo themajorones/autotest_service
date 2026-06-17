@@ -6,10 +6,13 @@ import org.springframework.amqp.rabbit.core.RabbitOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import dev.themajorones.ats.repository.AndroidTestStepHistoryRepository;
 import dev.themajorones.ats.repository.TaskLogRepository;
 import dev.themajorones.ats.service.TaskLogService;
+import dev.themajorones.ats.service.progress.TaskProgressBroadcaster;
 import dev.themajorones.models.constants.RabbitMqConstant;
 import dev.themajorones.models.constants.TaskLogConstant;
+import dev.themajorones.models.constants.TaskProgressConstant;
 import dev.themajorones.models.dto.TaskCommandEnvelope;
 import dev.themajorones.models.entity.TaskLog;
 import dev.themajorones.models.util.JsonUtils;
@@ -21,6 +24,8 @@ import tools.jackson.databind.ObjectMapper;
 public class TaskLogServiceImpl implements TaskLogService {
 
     private final TaskLogRepository taskLogRepository;
+    private final AndroidTestStepHistoryRepository androidTestStepHistoryRepository;
+    private final TaskProgressBroadcaster taskProgressBroadcaster;
     private final RabbitOperations rabbitOperations;
     private final ObjectMapper objectMapper;
 
@@ -41,6 +46,7 @@ public class TaskLogServiceImpl implements TaskLogService {
             throw new IllegalStateException("Task log is already in progress");
         }
 
+        androidTestStepHistoryRepository.deleteAllByTaskLogId(taskLog.getId());
         taskLog
             .setStatus(TaskLogConstant.Status.PENDING)
             .setStartedAt(null)
@@ -60,13 +66,17 @@ public class TaskLogServiceImpl implements TaskLogService {
         );
 
         taskLog.setStatus(TaskLogConstant.Status.QUEUED);
-        return taskLogRepository.save(taskLog);
+        TaskLog saved = taskLogRepository.save(taskLog);
+        taskProgressBroadcaster.broadcastTaskLog(saved, TaskProgressConstant.EventType.TASK_LOG_UPSERTED);
+        return saved;
     }
 
     @Transactional
     @Override
     public void clearTaskLogs() {
+        androidTestStepHistoryRepository.deleteAllInBatch();
         taskLogRepository.deleteAllInBatch();
+        taskProgressBroadcaster.broadcastTaskLogsCleared();
     }
 
     private String routingKeyFor(String type) {
@@ -75,6 +85,9 @@ public class TaskLogServiceImpl implements TaskLogService {
         }
         if (TaskLogConstant.Type.INSTALL_APK.equals(type)) {
             return RabbitMqConstant.Queue.Artifact.ROUTING_KEY;
+        }
+        if (TaskLogConstant.Type.ANDROID_AUTONOMOUS_TEST.equals(type)) {
+            return RabbitMqConstant.Queue.AndroidTest.ROUTING_KEY;
         }
         throw new IllegalArgumentException("Unsupported task log type: " + type);
     }

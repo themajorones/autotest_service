@@ -39,14 +39,14 @@ export function clearStoredAuthTokens() {
   window.localStorage.removeItem(REFRESH_TOKEN_EXPIRES_AT_KEY);
 }
 
-export async function getText(path: string): Promise<string> {
-  const response = await request(path, { headers: { Accept: 'text/plain' } });
+export async function getText(path: string, init: RequestInit = {}): Promise<string> {
+  const response = await request(path, { ...init, headers: { Accept: 'text/plain', ...(init.headers || {}) } });
   await assertOk(response);
   return response.text();
 }
 
-export async function getJson<T>(path: string): Promise<T> {
-  const response = await request(path, { headers: { Accept: 'application/json' } });
+export async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await request(path, { ...init, headers: { Accept: 'application/json', ...(init.headers || {}) } });
   await assertOk(response);
   return response.json() as Promise<T>;
 }
@@ -79,8 +79,8 @@ export async function sendFormData<T>(path: string, method: 'POST' | 'PUT', body
   return response.json() as Promise<T>;
 }
 
-export async function getBlob(path: string): Promise<Blob> {
-  const response = await request(path, { headers: { Accept: '*/*' } });
+export async function getBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  const response = await request(path, { ...init, headers: { Accept: '*/*', ...(init.headers || {}) } });
   await assertOk(response);
   return response.blob();
 }
