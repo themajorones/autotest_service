@@ -124,6 +124,7 @@ type AndroidTestStepHistory = {
   visionText?: string | null;
   action?: string | null;
   state?: string | null;
+  targetElementId?: number | null;
   targetX?: number | null;
   targetY?: number | null;
   swipeX1?: number | null;
@@ -747,15 +748,17 @@ export function App() {
 
   async function fetchOllamaModels() {
     setStatus('Fetching Ollama models');
-    const nextModels = await sendJson<OllamaModel[]>('/api/connections/ollama/models', 'POST', {
-      baseUrl: ollamaForm.baseUrl,
-    });
+    const nextModels = await fetchOllamaModelsForBaseUrl(ollamaForm.baseUrl);
     setModels(nextModels);
     setOllamaForm((current) => ({
       ...current,
       model: nextModels.some((model) => model.name === current.model) ? current.model : nextModels[0]?.name || '',
     }));
     setStatus(`Loaded ${nextModels.length} models`);
+  }
+
+  async function fetchOllamaModelsForBaseUrl(baseUrl: string) {
+    return sendJson<OllamaModel[]>('/api/connections/ollama/models', 'POST', { baseUrl });
   }
 
   async function submitOllama(event: FormEvent) {
@@ -853,7 +856,7 @@ export function App() {
     setStatus(`Direct Android connected${'androidId' in saved ? ` (#${saved.androidId})` : ''}`);
   }
 
-  function editOllama(row: Ollama) {
+  async function editOllama(row: Ollama) {
     setEditingOllamaId(row.id);
     setOllamaForm({
       name: row.name,
@@ -862,7 +865,14 @@ export function App() {
       enabled: row.enabled,
     });
     setModels([{ name: row.model, model: row.model, size: 0 }]);
-    setStatus('Editing Ollama connection');
+    setStatus('Editing Ollama connection; refreshing models');
+    const nextModels = await fetchOllamaModelsForBaseUrl(row.baseUrl);
+    setModels(nextModels);
+    setOllamaForm((current) => ({
+      ...current,
+      model: nextModels.some((model) => model.name === row.model) ? row.model : nextModels[0]?.name || row.model,
+    }));
+    setStatus(`Editing Ollama connection; loaded ${nextModels.length} models`);
   }
 
   function editDocker(row: Docker) {
@@ -2318,10 +2328,12 @@ function formatStepDuration(step: Pick<AndroidTestStepHistory, 'startedAt' | 'en
 }
 
 function formatTarget(step: AndroidTestStepHistory) {
+  const element = step.targetElementId == null ? null : `#${step.targetElementId}`;
   if (step.targetX == null || step.targetY == null) {
-    return '-';
+    return element ?? '-';
   }
-  return `${step.targetX},${step.targetY}`;
+  const coordinates = `${step.targetX},${step.targetY}`;
+  return element == null ? coordinates : `${element} -> ${coordinates}`;
 }
 
 function formatSwipe(step: AndroidTestStepHistory) {

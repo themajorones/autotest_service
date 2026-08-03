@@ -13,6 +13,7 @@ public record AndroidTestStepHistoryResponse(
     String visionText,
     String action,
     String state,
+    Integer targetElementId,
     Integer targetX,
     Integer targetY,
     Integer swipeX1,

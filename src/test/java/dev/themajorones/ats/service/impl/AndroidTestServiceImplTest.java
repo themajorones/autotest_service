@@ -158,7 +158,9 @@ class AndroidTestServiceImplTest {
                 .setStartedAt(10L)
                 .setEndedAt(20L)
                 .setAction("CLICK")
-                .setState("IN_PROGRESS")
+                .setTargetElementId(2)
+                .setTargetX(548)
+                .setTargetY(548)
                 .setImageStorageKey("android-tests/77/steps/1.png"),
             new AndroidTestStepHistory()
                 .setId(2)
@@ -166,7 +168,7 @@ class AndroidTestServiceImplTest {
                 .setStepNumber(2)
                 .setStartedAt(21L)
                 .setEndedAt(30L)
-                .setAction("TERMINATE")
+                .setAction("FINISH")
                 .setState("SUCCESS")
                 .setImageStorageKey("android-tests/77/steps/2.png")
         ));
@@ -174,6 +176,7 @@ class AndroidTestServiceImplTest {
         var steps = service.listAndroidTestSteps(77);
 
         assertThat(steps).extracting("stepNumber").containsExactly(1, 2);
+        assertThat(steps.get(0).targetElementId()).isEqualTo(2);
         assertThat(steps.get(1).imageStorageKey()).isEqualTo("android-tests/77/steps/2.png");
     }
 

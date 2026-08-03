@@ -189,6 +189,7 @@ public class AndroidTestServiceImpl implements AndroidTestService {
             history.getVisionText(),
             history.getAction(),
             history.getState(),
+            history.getTargetElementId(),
             history.getTargetX(),
             history.getTargetY(),
             history.getSwipeX1(),
